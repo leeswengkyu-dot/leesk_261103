@@ -129,14 +129,27 @@ function Layers({ events, selectedId, onSelect, region, fitAll, numbers }: Props
   return null;
 }
 
+// CARTO 래스터 타일은 2026-09-25 부터 API 키가 필수 (https://carto.com/basemaps/apikey).
+// 키는 브라우저에 노출되는 공개용 값이며, CARTO 대시보드의 도메인(Referer) 제한으로 보호한다.
+// 키가 없으면 OpenStreetMap 기본 타일로 대체한다(지명은 현지 언어로 표시됨).
+const CARTO_KEY = process.env.NEXT_PUBLIC_CARTO_KEY;
+const TILE = CARTO_KEY
+  ? {
+      url: `https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=${encodeURIComponent(CARTO_KEY)}`,
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, © <a href="https://carto.com/attributions/">CARTO</a>',
+    }
+  : {
+      url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    };
+
 export default function MapView(props: Props) {
   const v = REGION_VIEW[props.region] ?? REGION_VIEW.all;
   return (
     <MapContainer center={v.center} zoom={v.zoom} minZoom={3} maxZoom={12} scrollWheelZoom style={{ height: props.height ?? '100%', width: '100%' }}>
       <TileLayer
-        attribution="© OpenStreetMap contributors © CARTO"
-        url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-        subdomains="abcd"
+        attribution={TILE.attribution}
+        url={TILE.url}
         maxNativeZoom={12}
         maxZoom={12}
         eventHandlers={{ tileerror: () => props.onTileError?.() }}
