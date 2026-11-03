@@ -36,7 +36,7 @@ npm run start:local
 | `DATABASE_URL` | Supabase 연결 문자열 (필수) |
 | `EDIT_PIN` | 쓰기용 공유 PIN, 6자리 이상 (필수. 없으면 편집·수집 버튼이 모두 막힙니다) |
 | `CRON_SECRET` | 임의의 긴 문자열 (필수. 매일 자동 수집 인증용) |
-| `ANTHROPIC_API_KEY`, `AI_MODEL` | 선택. 없으면 키워드 규칙으로 동작 |
+| `GEMINI_API_KEY`, `AI_MODEL` | 선택. Gemini API 키(또는 `ANTHROPIC_API_KEY`). 없으면 키워드 규칙으로 동작 |
 
 4. **Deploy**. 배포 후 주소(`https://….vercel.app`)를 열면 상황판이 나옵니다.
 
@@ -57,8 +57,11 @@ npm run start:local
 |---|---|---|
 | `DATABASE_URL` | Postgres 연결 문자열. 없으면 로컬 파일 DB | 없음 |
 | `PGLITE_DIR` | 로컬 파일 DB 경로 | `./data/pglite` |
-| `ANTHROPIC_API_KEY` | Claude API 키. **없어도 실행됩니다** | 없음 |
-| `AI_MODEL` | 사용할 모델 ID (예: `claude-sonnet-5-5`) | 없음 |
+| `AI_PROVIDER` | `gemini` 또는 `anthropic`. 비우면 키가 있는 쪽 자동 선택(Gemini 우선) | 자동 |
+| `GEMINI_API_KEY` | Google Gemini API 키 (aistudio.google.com/apikey, 무료 등급 가능). **없어도 실행됩니다** | 없음 |
+| `ANTHROPIC_API_KEY` | Claude API 키 (`AI_PROVIDER=anthropic` 일 때) | 없음 |
+| `AI_MODEL` | 사용할 모델 ID | Gemini: `gemini-3.6-flash` |
+| `AI_FALLBACK_MODEL` | Gemini 과부하(503)·한도(429) 시 예비 모델 | `gemini-3.5-flash-lite` |
 | `AI_DAILY_LIMIT` / `AI_BATCH_LIMIT` | 하루 AI 호출 상한 / 수집 1회당 AI 처리 기사 수 | 300 / 100 |
 | `LIVE_INTERVAL_MIN` | 실시간 수집 간격(분). 0 이면 끔 | 10 |
 | `PORT` | 로컬 포트 | `3000` |
