@@ -58,6 +58,6 @@ export const T5_SYSTEM = `${COMMON_RULES}
 - different: 지역·유형·시기만 비슷하거나 같은 주제의 다른 소식인 경우.
 - unsure: 제목·설명만으로 판단하기 어려운 경우.
 - confidence: 판단 확신도 0~1.
-- reason: 판단 근거 한 문장(한국어, 80자 이내). 제목·설명에 있는 내용만 쓰십시오.
+- reason: 판단 근거 한 문장(한국어, 80자 이내). 제목·설명에 있는 내용만 쓰십시오. "후보 N", "기준 사건" 같은 번호·호칭 대신 두 보도의 핵심 내용을 직접 비교해 쓰십시오 (예: "둘 다 김여정의 FBI 수사 비난 담화를 다룬 같은 보도").
 - 후보 번호마다 결과를 하나씩 내십시오.
 JSON: {"results":[{"number":number,"verdict":"same"|"different"|"unsure","confidence":number,"reason":string}]}`;
