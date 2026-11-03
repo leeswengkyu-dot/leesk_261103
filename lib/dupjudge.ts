@@ -12,7 +12,7 @@ import { T5Schema } from './ai/schemas';
 /** 한 번의 AI 호출에 넣는 후보 수 */
 const CHUNK = 10;
 /** 수집 1회당 중복 판단에 쓰는 AI 호출 상한 */
-const callsPerRun = () => parseInt(process.env.DUP_AI_CALLS ?? '5', 10);
+const callsPerRun = () => parseInt(process.env.DUP_AI_CALLS ?? '12', 10);
 
 interface Cand {
   id: string;
