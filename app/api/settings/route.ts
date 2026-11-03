@@ -4,8 +4,10 @@ import { aiStatus } from '@/lib/ai/provider';
 import { isCollecting } from '@/lib/collect';
 import { isLanMode } from '@/lib/pin';
 import { ValidationError } from '@/lib/events';
+import { reanalyzeLeft, reanalyzePending } from '@/lib/reanalyze';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
 
 export const GET = read(async () => {
   const d = db();
@@ -27,7 +29,8 @@ export const GET = read(async () => {
     collecting: await isCollecting(),
     ai: await aiStatus(),
     storage: { ...(await dbInfo()), events: await count('events'), articles: await count('articles') },
-    mode: isLanMode() ? 'lan' : 'local',
+    mode: process.env.VERCEL ? 'web' : isLanMode() ? 'lan' : 'local',
+    reanalyze_left: await reanalyzeLeft(),
     ai_mode: await getSetting('ai_mode', 'api'),
     live: { on: (await getSetting('live', 'on')) !== 'off', interval_min: live, active: live > 0 },
   };
@@ -42,4 +45,12 @@ export const PATCH = write(async (req) => {
   }
   if (b.feed_id) await db().prepare('UPDATE feeds SET active=? WHERE id=?').run(b.active ? 1 : 0, b.feed_id);
   return { ok: true };
+});
+
+/** 동작: reanalyze (기존 사건 AI 재분석을 지금 실행, 한 번에 최대 40건 · 약 4분 안에서) */
+export const POST = write(async (req) => {
+  const b = await body<{ action?: string; max?: number }>(req);
+  if (b.action !== 'reanalyze') throw new ValidationError('알 수 없는 동작입니다');
+  const max = Math.min(Math.max(Number(b.max) || 20, 1), 40);
+  return reanalyzePending({ max, deadline: Date.now() + 240_000 });
 });
