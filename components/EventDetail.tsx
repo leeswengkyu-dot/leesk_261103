@@ -6,6 +6,7 @@ import { api, ApiError } from '@/lib/client/api';
 import { fmtKst } from '@/lib/time';
 import { ACCURACY, EVENT_TYPES, REGIONS, LABELS, LABEL_KEYS, CHANGE_TYPES } from '@/lib/types';
 import { alertText } from '@/lib/rules/labels';
+import { googleEarthUrl } from '@/lib/earth';
 import { AlertBadges, ChangeBadge, Chip, LabelBadge, RelBadge } from './Badges';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -229,6 +230,25 @@ export default function EventDetail({ id, aiAvailable, aiReason, onClose, onChan
         </section>
         {e.coord_origin === 'ai_estimated' && e.lat != null && <div className="rounded bg-amber-50 p-2 text-xs text-amber-900">AI 추정 위치 — 확인 필요 (좌표를 직접 고치면 &quot;사람 확인&quot;으로 바뀝니다)</div>}
         {e.coord_origin === 'gazetteer' && e.lat != null && <div className="rounded bg-amber-50 p-2 text-xs text-amber-900">지명 사전 기반 추정 위치(&quot;{e.location_name}&quot; 일대 대표 좌표) — 기사 속 지명으로 자동 부여했으므로 확인 필요 (좌표를 직접 고치면 &quot;사람 확인&quot;으로 바뀝니다)</div>}
+        {e.lat != null && e.lng != null && (
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <a className="btn btn-sm" href={googleEarthUrl(Number(e.lat), Number(e.lng), { accuracy: e.location_accuracy, radiusKm: e.area_radius_km })} target="_blank" rel="noopener noreferrer" title="구글어스 위성사진에서 이 위치 보기 (새 탭)">구글어스에서 보기 ↗</a>
+            <button className="btn btn-sm" title="구글어스 프로(데스크톱)에서 열 수 있는 이 사건의 KML 파일" onClick={async () => {
+              try {
+                const res = await fetch('/api/export-kml', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [id], title: `ARGUS-K ${e.title}` }) });
+                if (!res.ok) throw new Error('KML 을 만들지 못했습니다');
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(await res.blob());
+                a.download = `ARGUS-K_${String(e.title).replace(/[\\/:*?"<>|]/g, '').slice(0, 40)}.kml`;
+                a.click();
+                URL.revokeObjectURL(a.href);
+              } catch (er) {
+                setErr((er as Error).message);
+              }
+            }}>KML 받기 (구글어스 프로)</button>
+            <span className="text-gray-500">저장된 좌표({e.lat}, {e.lng}) 기준 · 위성사진으로 위치 확인</span>
+          </div>
+        )}
         <div className="text-xs text-gray-600">신뢰도 근거: {d.reliability_basis}{e.alert_reasons.length ? ` · 경보 사유: ${e.alert_reasons.map(alertText).join(', ')}` : ''}</div>
         <label className="block text-xs text-gray-600">메모 (공개정보 수준만)
           <textarea className="input mt-0.5" rows={2} disabled={readOnly} value={f.memo} onChange={(ev) => setF({ ...f, memo: ev.target.value })} />

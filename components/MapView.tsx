@@ -10,6 +10,7 @@ import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import { REGION_VIEW } from '@/lib/geo';
 import { RELIABILITY, ACCURACY, EVENT_TYPES, type EventRow } from '@/lib/types';
 import { fmtKst } from '@/lib/time';
+import { googleEarthUrl } from '@/lib/earth';
 
 interface Props {
   events: EventRow[];
@@ -88,7 +89,10 @@ function Layers({ events, selectedId, onSelect, region, fitAll, numbers }: Props
         ${EVENT_TYPES[e.event_type]?.name ?? ''} · 위치 ${ACCURACY[e.location_accuracy]}${e.location_accuracy === 'area' ? ` (반경 ${e.area_radius_km ?? ''}km)` : ''}<br/>
         신뢰도 ${rel.name} · 출처 ${e.source_count}건<br/>
         ${e.location_conflict ? '<b style="color:#b91c1c">위치 충돌</b><br/>' : ''}
-        <button data-open="${e.id}" style="margin-top:6px;padding:2px 8px;border:1px solid #2563eb;color:#2563eb;border-radius:4px;background:#fff;cursor:pointer">상세 보기</button></div>`;
+        <div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap">
+          <button data-open="${e.id}" style="padding:2px 8px;border:1px solid #2563eb;color:#2563eb;border-radius:4px;background:#fff;cursor:pointer">상세 보기</button>
+          <a href="${esc(googleEarthUrl(e.lat, e.lng, { accuracy: e.location_accuracy, radiusKm: e.area_radius_km }))}" target="_blank" rel="noopener noreferrer" title="구글어스 위성사진에서 이 위치 보기 (새 탭)" style="padding:2px 8px;border:1px solid #15803d;color:#15803d;border-radius:4px;background:#fff;text-decoration:none">구글어스에서 보기 ↗</a>
+        </div></div>`;
       m.bindPopup(popup);
       m.on('click', () => selRef.current?.(e.id));
       m.on('popupopen', (ev) => {
