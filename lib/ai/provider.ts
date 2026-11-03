@@ -23,22 +23,22 @@ export interface AiStatus {
 const dailyLimit = () => parseInt(process.env.AI_DAILY_LIMIT || '300', 10);
 export const batchLimit = () => parseInt(process.env.AI_BATCH_LIMIT || '100', 10);
 
-export function aiUsedToday(): number {
-  const r = db().prepare('SELECT call_count c FROM ai_usage WHERE usage_date=?').get(kstDate()) as { c: number } | undefined;
+export async function aiUsedToday(): Promise<number> {
+  const r = await db().prepare('SELECT call_count c FROM ai_usage WHERE usage_date=?').get<{ c: number }>(kstDate());
   return r?.c ?? 0;
 }
 
-function bumpUsage() {
-  db()
-    .prepare('INSERT INTO ai_usage (usage_date, call_count) VALUES (?,1) ON CONFLICT(usage_date) DO UPDATE SET call_count=call_count+1')
+async function bumpUsage() {
+  await db()
+    .prepare('INSERT INTO ai_usage (usage_date, call_count) VALUES (?,1) ON CONFLICT(usage_date) DO UPDATE SET call_count=ai_usage.call_count+1')
     .run(kstDate());
 }
 
-export function aiStatus(): AiStatus {
-  const mode = getSetting('ai_mode', 'api') === 'pre' ? 'pre' : 'api';
+export async function aiStatus(): Promise<AiStatus> {
+  const mode = (await getSetting('ai_mode', 'api')) === 'pre' ? 'pre' : 'api';
   const hasKey = !!process.env.ANTHROPIC_API_KEY;
   const model = process.env.AI_MODEL || null;
-  const used = aiUsedToday();
+  const used = await aiUsedToday();
   const limit = dailyLimit();
   let reason: string | null = null;
   let code: string | null = null;
@@ -69,13 +69,13 @@ let client: Anthropic | null = null;
 
 /** AI 호출 → JSON → zod 검증. 실패하면 1회 재시도. 호출 때마다 사용량을 센다. */
 export async function aiJson<T>(system: string, user: string, schema: ZodType<T>): Promise<T> {
-  const st = aiStatus();
+  const st = await aiStatus();
   if (!st.available) throw new AiUnavailable((st.code as 'no_key') ?? 'no_key', st.reason ?? 'AI 사용 불가');
   if (!client) client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: 60_000, maxRetries: 0 });
   let lastErr: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
-    if (aiUsedToday() >= dailyLimit()) throw new AiUnavailable('limit', '오늘 AI 호출 한도에 도달했습니다');
-    bumpUsage();
+    if ((await aiUsedToday()) >= dailyLimit()) throw new AiUnavailable('limit', '오늘 AI 호출 한도에 도달했습니다');
+    await bumpUsage();
     try {
       const res = await client.messages.create({
         model: process.env.AI_MODEL as string,

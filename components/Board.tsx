@@ -152,6 +152,28 @@ export default function Board() {
     return () => clearInterval(t);
   }, [load]);
 
+  // 실시간 수집: 서버에는 상시 타이머가 없으므로 상황판이 열려 있는 동안 1분마다 신호를 보낸다.
+  // 서버가 설정 간격·진행 여부를 확인해 필요할 때만 수집한다.
+  const liveOn = !!data?.live.enabled;
+  useEffect(() => {
+    if (!liveOn) return;
+    let stop = false;
+    const tick = async () => {
+      try {
+        const r = await fetch('/api/live', { method: 'POST', cache: 'no-store' });
+        const j = (await r.json().catch(() => ({}))) as { ran?: boolean };
+        if (!stop && j.ran) load();
+      } catch {}
+    };
+    const first = setTimeout(tick, 5000);
+    const t = setInterval(tick, 60_000);
+    return () => {
+      stop = true;
+      clearTimeout(first);
+      clearInterval(t);
+    };
+  }, [liveOn, load]);
+
   // 수집 중이면 짧게 폴링
   useEffect(() => {
     if (!data?.status.collecting) return;
@@ -335,7 +357,7 @@ export default function Board() {
       {(collecting || st?.collecting) && <div className="bg-blue-600 px-4 py-1.5 text-sm text-white">{st?.running_trigger === 'catchup' ? '놓친 아침 수집을 지금 실행합니다...' : '수집을 실행 중입니다... 새 사건이 생기면 목록에 자동으로 나타납니다 (최대 몇 분)'}</div>}
       <div className="flex flex-wrap items-center gap-3 border-b bg-white px-4 py-1 text-xs text-gray-700">
         {data?.live.enabled ? (
-          <span className="font-semibold text-emerald-700">● 실시간 수집 켜짐 — {data.live.interval_min}분마다 자동 수집 · 화면은 15초마다 갱신</span>
+          <span className="font-semibold text-emerald-700">● 실시간 수집 켜짐 — 이 화면이 열려 있는 동안 {data.live.interval_min}분마다 자동 수집 · 화면은 15초마다 갱신</span>
         ) : (
           <span className="text-gray-500">○ 실시간 자동 수집 꺼짐 (데이터·설정에서 켤 수 있음)</span>
         )}

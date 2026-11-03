@@ -7,7 +7,7 @@ if (!loadEnv()) console.warn('[ARGUS-K] .env.local 이 없습니다. .env.exampl
 const host = mode === 'lan' ? '0.0.0.0' : '127.0.0.1';
 const port = parseInt(process.env.PORT || '3000', 10);
 process.env.HOST = host;
-if (!process.env.DB_PATH) process.env.DB_PATH = './data/argus.db';
+if (!process.env.DATABASE_URL && !process.env.PGLITE_DIR) process.env.PGLITE_DIR = './data/pglite';
 
 if (mode === 'lan') {
   const pin = process.env.EDIT_PIN || '';
@@ -23,7 +23,7 @@ if (!(await portFree(port, host))) {
 }
 
 console.log(`\n[ARGUS-K] ${mode === 'lan' ? '내부망 공유 모드 — 같은 네트워크에서 접속 가능 (쓰기에 PIN 필요)' : '로컬 모드 — 이 PC에서만 접속 가능'}`);
-console.log(`[ARGUS-K] DB: ${process.env.DB_PATH}\n`);
+console.log(`[ARGUS-K] DB: ${process.env.DATABASE_URL ? 'Postgres (DATABASE_URL)' : 'PGlite 로컬 파일 ' + process.env.PGLITE_DIR}\n`);
 
 if (!process.argv.includes('--no-build')) {
   console.log('[ARGUS-K] 빌드 중... (처음에는 1~2분 걸립니다)');

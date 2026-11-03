@@ -1,5 +1,5 @@
 import Papa from 'papaparse';
-import { db } from './db';
+import { db, inTx } from './db';
 import { parseTime } from './time';
 import { EVENT_TYPES, LABELS, RELIABILITY, REGIONS, type EventRow } from './types';
 import { insertEvent } from './ingest';
@@ -32,7 +32,7 @@ interface Row {
   published: string;
 }
 
-export function importCsv(text: string): CsvResult {
+export async function importCsv(text: string): Promise<CsvResult> {
   const parsed = Papa.parse<Record<string, string>>(text.replace(/^﻿/, ''), { header: true, skipEmptyLines: true, transformHeader: (h) => h.trim() });
   const res: CsvResult = { total_rows: parsed.data.length, imported_rows: 0, events: 0, skipped_duplicates: 0, errors: [] };
   const header = parsed.meta.fields ?? [];
@@ -73,8 +73,9 @@ export function importCsv(text: string): CsvResult {
   });
 
   for (const rows of groups.values()) {
-    d.transaction(() => {
-      const fresh = rows.filter((x) => !d.prepare('SELECT 1 FROM articles WHERE url=?').get(normalizeUrl(x.r.url)));
+    await inTx(async () => {
+      const fresh: Row[] = [];
+      for (const x of rows) if (!(await d.prepare('SELECT 1 FROM articles WHERE url=?').get(normalizeUrl(x.r.url)))) fresh.push(x);
       res.skipped_duplicates += rows.length - fresh.length;
       if (!fresh.length) return;
       fresh.sort((a, b) => a.published.localeCompare(b.published));
@@ -82,7 +83,7 @@ export function importCsv(text: string): CsvResult {
       const withCoord = fresh.find((x) => x.r.lat && x.r.lng)?.r;
       const acc = (withCoord?.location_accuracy || (withCoord ? 'exact' : 'unknown')) as 'exact' | 'area' | 'unknown';
       const hasSummary = fresh.some((x) => x.r.summary_statements);
-      const evId = insertEvent({
+      const evId = await insertEvent({
         title: f.title.slice(0, 300),
         region: f.region,
         country: f.country || null,
@@ -102,11 +103,11 @@ export function importCsv(text: string): CsvResult {
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'skipped',?)`,
       );
       for (const x of fresh) {
-        insA.run(uuid(), evId, x.r.source_name, x.r.source_grade, x.r.is_party_claim?.toLowerCase() === 'true' ? 1 : 0, normalizeUrl(x.r.url), x.r.title, null, x.published, x.r.location_name || null, x.r.lat ? Number(x.r.lat) : null, x.r.lng ? Number(x.r.lng) : null, nowIso());
+        await insA.run(uuid(), evId, x.r.source_name, x.r.source_grade, x.r.is_party_claim?.toLowerCase() === 'true' ? 1 : 0, normalizeUrl(x.r.url), x.r.title, null, x.published, x.r.location_name || null, x.r.lat ? Number(x.r.lat) : null, x.r.lng ? Number(x.r.lng) : null, nowIso());
         res.imported_rows++;
       }
       res.events++;
-      const arts = articlesOf(evId);
+      const arts = await articlesOf(evId);
       for (const x of fresh) {
         if (!x.r.summary_statements) continue;
         for (const item of x.r.summary_statements.split(' || ')) {
@@ -114,17 +115,17 @@ export function importCsv(text: string): CsvResult {
           if (!label || !text) continue;
           const ids = (urls ?? '').split(',').map((u) => arts.find((a) => a.url === normalizeUrl(u.trim()))?.id).filter(Boolean) as string[];
           try {
-            saveStatement({ event_id: evId, text, label: label.trim(), article_ids: ids, origin: 'pre_generated', downgrade: true });
+            await saveStatement({ event_id: evId, text, label: label.trim(), article_ids: ids, origin: 'pre_generated', downgrade: true });
           } catch (e) {
             res.errors.push({ row: x.rowNo, column: 'summary_statements', reason: (e as Error).message });
           }
         }
       }
-      const e = d.prepare('SELECT * FROM events WHERE id=?').get(evId) as never;
-      d.prepare('UPDATE events SET change_type=? WHERE id=?').run(defaultChangeType(e), evId);
-      recomputeEvent(evId);
-      findDuplicateCandidates(evId);
-    })();
+      const e = (await d.prepare('SELECT * FROM events WHERE id=?').get(evId)) as never;
+      await d.prepare('UPDATE events SET change_type=? WHERE id=?').run(await defaultChangeType(e), evId);
+      await recomputeEvent(evId);
+      await findDuplicateCandidates(evId);
+    });
   }
   return res;
 }
@@ -133,11 +134,11 @@ export function importCsv(text: string): CsvResult {
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-export function buildKml(rows: EventRow[], title: string): string {
-  const pm = rows
+export async function buildKml(rows: EventRow[], title: string): Promise<string> {
+  const pm = (await Promise.all(rows
     .filter((e) => e.lat != null && e.lng != null)
-    .map((e) => {
-      const det = getEventDetail(e.id);
+    .map(async (e) => {
+      const det = await getEventDetail(e.id);
       const lines: string[] = [];
       lines.push(`발생 시각(KST): ${fmtKst(e.occurred_at ?? e.first_published_at)}`);
       lines.push(`신뢰도: ${RELIABILITY[e.reliability].name}`);
@@ -147,7 +148,7 @@ export function buildKml(rows: EventRow[], title: string): string {
       lines.push('');
       for (const a of det?.articles ?? []) lines.push(`출처: ${a.source_name} ${a.url}`);
       return `<Placemark><name>${esc(e.title)}</name><description>${esc(lines.join('\n'))}</description><Point><coordinates>${e.lng},${e.lat},0</coordinates></Point></Placemark>`;
-    })
+    })))
     .join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>${esc(title)}</name>\n${pm}\n</Document></kml>\n`;
 }

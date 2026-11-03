@@ -1,4 +1,4 @@
-import { db, uuid } from './db';
+import { db, inTx, uuid } from './db';
 import { nowIso, addHours } from './time';
 import { conflictCircle, haversineKm, maxPairDistanceKm, LOCATION_CONFLICT_KM, round3 } from './geo';
 import {
@@ -33,18 +33,18 @@ export interface ArticleRow extends ArticleLite {
   fetched_at: string;
 }
 
-export function articlesOf(eventId: string): ArticleRow[] {
-  return db().prepare('SELECT * FROM articles WHERE event_id=? ORDER BY published_at ASC').all(eventId) as ArticleRow[];
+export async function articlesOf(eventId: string): Promise<ArticleRow[]> {
+  return db().prepare('SELECT * FROM articles WHERE event_id=? ORDER BY published_at ASC').all<ArticleRow>(eventId);
 }
 
 const artPts = (arts: ArticleRow[]) =>
   arts.filter((a) => a.extracted_lat != null && a.extracted_lng != null).map((a) => ({ lat: a.extracted_lat as number, lng: a.extracted_lng as number }));
 
 /** 목록·지도용 사건 행 (rejected, merged 제외) */
-export function listEventRows(): EventRow[] {
+export async function listEventRows(): Promise<EventRow[]> {
   const d = db();
-  const events = d.prepare("SELECT * FROM events WHERE review_status IN ('collected','reviewed') ORDER BY COALESCE(occurred_at, first_published_at) DESC").all() as Record<string, unknown>[];
-  const arts = d.prepare('SELECT event_id, extracted_lat, extracted_lng, source_name, source_grade FROM articles WHERE event_id IS NOT NULL ORDER BY published_at').all() as { event_id: string; extracted_lat: number | null; extracted_lng: number | null; source_name: string; source_grade: string }[];
+  const events = await d.prepare("SELECT * FROM events WHERE review_status IN ('collected','reviewed') ORDER BY COALESCE(occurred_at, first_published_at) DESC").all();
+  const arts = await d.prepare('SELECT event_id, extracted_lat, extracted_lng, source_name, source_grade FROM articles WHERE event_id IS NOT NULL ORDER BY published_at').all<{ event_id: string; extracted_lat: number | null; extracted_lng: number | null; source_name: string; source_grade: string }>();
   const ptsBy = new Map<string, { lat: number; lng: number }[]>();
   const srcBy = new Map<string, { name: string; grade: string }[]>();
   for (const a of arts) {
@@ -57,11 +57,11 @@ export function listEventRows(): EventRow[] {
     ptsBy.set(a.event_id, l);
   }
   const dupCnt = new Map<string, number>();
-  for (const r of d.prepare("SELECT event_a, event_b FROM duplicate_candidates WHERE status='suggested'").all() as { event_a: string; event_b: string }[]) {
+  for (const r of await d.prepare("SELECT event_a, event_b FROM duplicate_candidates WHERE status='suggested'").all<{ event_a: string; event_b: string }>()) {
     dupCnt.set(r.event_a, (dupCnt.get(r.event_a) ?? 0) + 1);
     dupCnt.set(r.event_b, (dupCnt.get(r.event_b) ?? 0) + 1);
   }
-  const st = d.prepare('SELECT event_id, label, COUNT(*) OVER (PARTITION BY event_id) n, position FROM summary_statements ORDER BY event_id, position').all() as { event_id: string; label: string; n: number }[];
+  const st = await d.prepare('SELECT event_id, label, COUNT(*) OVER (PARTITION BY event_id) n, position FROM summary_statements ORDER BY event_id, position').all<{ event_id: string; label: string; n: number }>();
   const stBy = new Map<string, { label: string; n: number }>();
   for (const s of st) if (!stBy.has(s.event_id)) stBy.set(s.event_id, { label: s.label, n: s.n });
 
@@ -122,29 +122,34 @@ export function regionSummaries(rows: EventRow[], now = new Date()): RegionSumma
   return out;
 }
 
-export function getEventDetail(id: string) {
+export async function getEventDetail(id: string) {
   const d = db();
-  const ev = d.prepare('SELECT * FROM events WHERE id=?').get(id) as Record<string, unknown> | undefined;
+  const ev = await d.prepare('SELECT * FROM events WHERE id=?').get(id);
   if (!ev) return null;
-  const articles = articlesOf(id);
-  const statements = (d.prepare('SELECT * FROM summary_statements WHERE event_id=? ORDER BY position, created_at').all(id) as Record<string, unknown>[]).map((s) => ({
-    ...s,
-    warnings: JSON.parse((s.warnings as string) || '[]') as string[],
-    article_ids: (d.prepare('SELECT article_id FROM statement_sources WHERE statement_id=?').all(s.id) as { article_id: string }[]).map((r) => r.article_id),
-  }));
-  const dups = d
+  const articles = await articlesOf(id);
+  const stRows = await d.prepare('SELECT * FROM summary_statements WHERE event_id=? ORDER BY position, created_at').all(id);
+  const statements = await Promise.all(
+    stRows.map(async (s) => ({
+      ...s,
+      warnings: JSON.parse((s.warnings as string) || '[]') as string[],
+      article_ids: (await d.prepare('SELECT article_id FROM statement_sources WHERE statement_id=?').all<{ article_id: string }>(s.id)).map((r) => r.article_id),
+    })),
+  );
+  const dups = await d
     .prepare(
       `SELECT c.id, c.status, CASE WHEN c.event_a=@id THEN c.event_b ELSE c.event_a END other_id
        FROM duplicate_candidates c WHERE (c.event_a=@id OR c.event_b=@id) AND c.status IN ('suggested','confirmed')`,
     )
-    .all({ id }) as { id: string; status: string; other_id: string }[];
-  const dupDetail = dups.map((c) => {
-    const o = d.prepare('SELECT id,title,occurred_at,first_published_at,location_name,source_count,review_status FROM events WHERE id=?').get(c.other_id) as Record<string, unknown> | undefined;
-    return { ...c, other: o ?? null };
-  });
-  const mergedChildren = d.prepare("SELECT id,title FROM events WHERE merged_into=?").all(id);
+    .all<{ id: string; status: string; other_id: string }>({ id });
+  const dupDetail = await Promise.all(
+    dups.map(async (c) => {
+      const o = await d.prepare('SELECT id,title,occurred_at,first_published_at,location_name,source_count,review_status FROM events WHERE id=?').get(c.other_id);
+      return { ...c, other: o ?? null };
+    }),
+  );
+  const mergedChildren = await d.prepare("SELECT id,title FROM events WHERE merged_into=?").all(id);
   const rel = computeReliability(articles);
-  const briefings = (d.prepare('SELECT id,status,briefing_date FROM briefings WHERE event_ids LIKE ?').all(`%${id}%`) as { id: string; status: string; briefing_date: string }[]);
+  const briefings = await d.prepare('SELECT id,status,briefing_date FROM briefings WHERE event_ids LIKE ?').all<{ id: string; status: string; briefing_date: string }>(`%${id}%`);
   const pts = artPts(articles);
   return {
     event: { ...ev, alert_reasons: JSON.parse((ev.alert_reasons as string) || '[]') as string[] },
@@ -161,32 +166,32 @@ export function getEventDetail(id: string) {
 /* ───────────── 재계산 ───────────── */
 
 /** 연결 기사 기준으로 출처 수·신뢰도·위치 충돌·경보·최초 게시 시각 갱신 */
-export function recomputeEvent(id: string) {
+export async function recomputeEvent(id: string) {
   const d = db();
-  const ev = d.prepare('SELECT * FROM events WHERE id=?').get(id) as Record<string, unknown> | undefined;
+  const ev = await d.prepare('SELECT * FROM events WHERE id=?').get(id);
   if (!ev) return;
-  const arts = articlesOf(id);
+  const arts = await articlesOf(id);
   const rel = computeReliability(arts);
   const pts = artPts(arts);
   const locConflict = pts.length > 1 && maxPairDistanceKm(pts) > LOCATION_CONFLICT_KM ? 1 : 0;
   const sourceCount = new Set(arts.map((a) => a.source_name)).size;
   const first = arts.length ? arts[0].published_at : (ev.first_published_at as string);
   const alerts = alertReasons({ event_type: ev.event_type as string, location_conflict: locConflict, content_conflict: ev.content_conflict as number });
-  d.prepare(
+  await d.prepare(
     'UPDATE events SET source_count=?, reliability=?, location_conflict=?, alert_reasons=?, first_published_at=?, updated_at=? WHERE id=?',
   ).run(sourceCount, rel.level, locConflict, JSON.stringify(alerts), first, nowIso(), id);
 }
 
 /** FR-F3-02 변화 구분 기본값: 직전 24시간 안에 같은 지역·유형·100km 이내 사건이 있으면 지속 */
-export function defaultChangeType(e: { id: string; region: string; event_type: string; occurred_at: string | null; first_published_at: string; lat: number | null; lng: number | null }): 'new' | 'continuing' {
+export async function defaultChangeType(e: { id: string; region: string; event_type: string; occurred_at: string | null; first_published_at: string; lat: number | null; lng: number | null }): Promise<'new' | 'continuing'> {
   const t = e.occurred_at ?? e.first_published_at;
   const from = addHours(t, -24);
-  const rows = db()
+  const rows = await db()
     .prepare(
       `SELECT lat,lng FROM events WHERE id<>? AND region=? AND event_type=? AND review_status IN ('collected','reviewed')
        AND COALESCE(occurred_at, first_published_at) >= ? AND COALESCE(occurred_at, first_published_at) < ?`,
     )
-    .all(e.id, e.region, e.event_type, from, t) as { lat: number | null; lng: number | null }[];
+    .all<{ lat: number | null; lng: number | null }>(e.id, e.region, e.event_type, from, t);
   for (const r of rows) {
     if (e.lat == null || r.lat == null || e.lng == null || r.lng == null) return 'continuing';
     if (haversineKm({ lat: e.lat, lng: e.lng }, { lat: r.lat as number, lng: r.lng as number }) <= 100) return 'continuing';
@@ -195,20 +200,20 @@ export function defaultChangeType(e: { id: string; region: string; event_type: s
 }
 
 /** FR-F1-16 중복 후보 계산 (제안만 한다) */
-export function findDuplicateCandidates(eventId: string): number {
+export async function findDuplicateCandidates(eventId: string): Promise<number> {
   const d = db();
-  const e = d.prepare('SELECT * FROM events WHERE id=?').get(eventId) as Record<string, unknown> | undefined;
+  const e = await d.prepare('SELECT * FROM events WHERE id=?').get(eventId);
   if (!e || (e.review_status !== 'collected' && e.review_status !== 'reviewed')) return 0;
-  const others = d
+  const others = await d
     .prepare("SELECT * FROM events WHERE id<>? AND region=? AND event_type=? AND review_status IN ('collected','reviewed')")
-    .all(eventId, e.region, e.event_type) as Record<string, unknown>[];
+    .all(eventId, e.region, e.event_type);
   let n = 0;
-  const ins = d.prepare('INSERT OR IGNORE INTO duplicate_candidates (id,event_a,event_b,status,created_at) VALUES (?,?,?,?,?)');
+  const ins = d.prepare('INSERT INTO duplicate_candidates (id,event_a,event_b,status,created_at) VALUES (?,?,?,?,?) ON CONFLICT DO NOTHING');
   const chk = d.prepare('SELECT 1 FROM duplicate_candidates WHERE (event_a=? AND event_b=?) OR (event_a=? AND event_b=?)');
   for (const o of others) {
     if (!isDuplicateCandidate(e as never, o as never)) continue;
-    if (chk.get(eventId, o.id, o.id, eventId)) continue;
-    ins.run(uuid(), eventId, o.id as string, 'suggested', nowIso());
+    if (await chk.get(eventId, o.id, o.id, eventId)) continue;
+    await ins.run(uuid(), eventId, o.id as string, 'suggested', nowIso());
     n++;
   }
   return n;
@@ -232,17 +237,18 @@ export interface StatementInput {
 }
 
 /** FR-F2-01~06 서버 검증을 적용해 문장을 저장한다. */
-export function saveStatement(inp: StatementInput): { id: string; label: string; warnings: string[] } {
+export async function saveStatement(inp: StatementInput): Promise<{ id: string; label: string; warnings: string[] }> {
   const d = db();
-  const ev = d.prepare('SELECT * FROM events WHERE id=?').get(inp.event_id) as Record<string, unknown> | undefined;
+  const ev = await d.prepare('SELECT * FROM events WHERE id=?').get(inp.event_id);
   if (!ev) throw new ValidationError('사건을 찾을 수 없습니다');
   const text = (inp.text || '').trim();
   if (!text) throw new ValidationError('문장 내용을 입력하세요');
   if (!['fact', 'analysis', 'estimate', 'party_claim', 'unverified'].includes(inp.label)) throw new ValidationError('알 수 없는 라벨입니다');
 
-  const own = new Set(articlesOf(inp.event_id).map((a) => a.id));
+  const own = new Set((await articlesOf(inp.event_id)).map((a) => a.id));
   const ids = [...new Set(inp.article_ids)].filter((x) => own.has(x));
-  const arts = ids.map((i) => d.prepare('SELECT * FROM articles WHERE id=?').get(i) as ArticleRow);
+  const arts: ArticleRow[] = [];
+  for (const i of ids) arts.push((await d.prepare('SELECT * FROM articles WHERE id=?').get<ArticleRow>(i)) as ArticleRow);
 
   let label = inp.label;
   let factSuggested = inp.fact_suggested ? 1 : 0;
@@ -289,78 +295,79 @@ export function saveStatement(inp: StatementInput): { id: string; label: string;
   const now = nowIso();
   const approvedBy = label === 'fact' && inp.human ? inp.actor || '실무자' : null;
   let id = inp.id;
-  d.transaction(() => {
+  await inTx(async () => {
     if (id) {
-      const ex = d.prepare('SELECT 1 FROM summary_statements WHERE id=? AND event_id=?').get(id, inp.event_id);
+      const ex = await d.prepare('SELECT 1 FROM summary_statements WHERE id=? AND event_id=?').get(id, inp.event_id);
       if (!ex) throw new ValidationError('문장을 찾을 수 없습니다');
-      d.prepare('UPDATE summary_statements SET text=?, label=?, fact_suggested=?, approved_by=?, warnings=?, updated_at=? WHERE id=?').run(
+      await d.prepare('UPDATE summary_statements SET text=?, label=?, fact_suggested=?, approved_by=?, warnings=?, updated_at=? WHERE id=?').run(
         text, label, factSuggested, approvedBy, JSON.stringify(warnings), now, id,
       );
-      d.prepare('DELETE FROM statement_sources WHERE statement_id=?').run(id);
+      await d.prepare('DELETE FROM statement_sources WHERE statement_id=?').run(id);
     } else {
       id = uuid();
-      const pos = (d.prepare('SELECT COALESCE(MAX(position),0)+1 p FROM summary_statements WHERE event_id=?').get(inp.event_id) as { p: number }).p;
-      d.prepare(
+      const pos = (await d.prepare('SELECT COALESCE(MAX(position),0)+1 p FROM summary_statements WHERE event_id=?').get<{ p: number }>(inp.event_id))!.p;
+      await d.prepare(
         'INSERT INTO summary_statements (id,event_id,position,text,label,fact_suggested,approved_by,origin,warnings,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
       ).run(id, inp.event_id, pos, text, label, factSuggested, approvedBy, inp.origin, JSON.stringify(warnings), now, now);
     }
     const ins = d.prepare('INSERT INTO statement_sources (statement_id,article_id) VALUES (?,?)');
-    ids.forEach((a) => ins.run(id, a));
-    if (inp.origin === 'human') d.prepare("UPDATE events SET summary_origin='human', updated_at=? WHERE id=? AND summary_origin='none'").run(now, inp.event_id);
-  })();
+    for (const a of ids) await ins.run(id, a);
+    if (inp.origin === 'human') await d.prepare("UPDATE events SET summary_origin='human', updated_at=? WHERE id=? AND summary_origin='none'").run(now, inp.event_id);
+  });
   return { id: id as string, label, warnings };
 }
 
 /** 문장 라벨 재검증: 사건의 출처가 바뀌면(병합 등) [사실]이 조건을 잃을 수 있다. */
-export function revalidateFacts(eventId: string) {
+export async function revalidateFacts(eventId: string) {
   const d = db();
-  const sts = d.prepare("SELECT id FROM summary_statements WHERE event_id=? AND label='fact'").all(eventId) as { id: string }[];
+  const sts = await d.prepare("SELECT id FROM summary_statements WHERE event_id=? AND label='fact'").all<{ id: string }>(eventId);
   for (const s of sts) {
-    const arts = d.prepare('SELECT a.* FROM articles a JOIN statement_sources ss ON ss.article_id=a.id WHERE ss.statement_id=?').all(s.id) as ArticleRow[];
+    const arts = await d.prepare('SELECT a.* FROM articles a JOIN statement_sources ss ON ss.article_id=a.id WHERE ss.statement_id=?').all<ArticleRow>(s.id);
     if (!checkFact(arts, true).ok) {
-      d.prepare("UPDATE summary_statements SET label='unverified', fact_suggested=1, approved_by=NULL, updated_at=? WHERE id=?").run(nowIso(), s.id);
+      await d.prepare("UPDATE summary_statements SET label='unverified', fact_suggested=1, approved_by=NULL, updated_at=? WHERE id=?").run(nowIso(), s.id);
     }
   }
 }
 
 /* ───────────── 검토·병합 ───────────── */
 
-export function reviewBlockers(eventId: string): string[] {
+export async function reviewBlockers(eventId: string): Promise<string[]> {
   const d = db();
-  const ev = d.prepare('SELECT * FROM events WHERE id=?').get(eventId) as Record<string, unknown> | undefined;
+  const ev = await d.prepare('SELECT * FROM events WHERE id=?').get(eventId);
   const out: string[] = [];
   if (!ev) return ['사건을 찾을 수 없습니다'];
-  if (articlesOf(eventId).length < 1) out.push('연결된 기사가 1개 이상 필요합니다');
-  if ((d.prepare('SELECT COUNT(*) c FROM summary_statements WHERE event_id=?').get(eventId) as { c: number }).c < 1) out.push('요약 문장이 1개 이상 필요합니다');
+  if ((await articlesOf(eventId)).length < 1) out.push('연결된 기사가 1개 이상 필요합니다');
+  if ((await d.prepare('SELECT COUNT(*) c FROM summary_statements WHERE event_id=?').get<{ c: number }>(eventId))!.c < 1) out.push('요약 문장이 1개 이상 필요합니다');
   if (!ev.event_type) out.push('사건 유형을 지정하세요');
   if (!ev.location_accuracy) out.push('위치 정확도를 지정하세요');
   return out;
 }
 
 /** FR-F1-18: 대표 사건에 모든 기사를 연결하고 나머지는 merged */
-export function mergeEvents(repId: string, otherId: string, candidateId?: string) {
+export async function mergeEvents(repId: string, otherId: string, candidateId?: string) {
   const d = db();
   if (repId === otherId) throw new ValidationError('같은 사건입니다');
-  const rep = d.prepare('SELECT * FROM events WHERE id=?').get(repId) as Record<string, unknown> | undefined;
-  const oth = d.prepare('SELECT * FROM events WHERE id=?').get(otherId) as Record<string, unknown> | undefined;
+  const rep = await d.prepare('SELECT * FROM events WHERE id=?').get(repId);
+  const oth = await d.prepare('SELECT * FROM events WHERE id=?').get(otherId);
   if (!rep || !oth) throw new ValidationError('사건을 찾을 수 없습니다');
-  d.transaction(() => {
-    d.prepare('UPDATE articles SET event_id=? WHERE event_id=?').run(repId, otherId);
-    d.prepare('UPDATE summary_statements SET event_id=?, position=position+1000 WHERE event_id=?').run(repId, otherId);
-    d.prepare("UPDATE events SET review_status='merged', merged_into=?, updated_at=? WHERE id=?").run(repId, nowIso(), otherId);
-    if (candidateId) d.prepare("UPDATE duplicate_candidates SET status='confirmed' WHERE id=?").run(candidateId);
+  await inTx(async () => {
+    await d.prepare('UPDATE articles SET event_id=? WHERE event_id=?').run(repId, otherId);
+    await d.prepare('UPDATE summary_statements SET event_id=?, position=position+1000 WHERE event_id=?').run(repId, otherId);
+    await d.prepare("UPDATE events SET review_status='merged', merged_into=?, updated_at=? WHERE id=?").run(repId, nowIso(), otherId);
+    if (candidateId) await d.prepare("UPDATE duplicate_candidates SET status='confirmed' WHERE id=?").run(candidateId);
     else
-      d.prepare("UPDATE duplicate_candidates SET status='confirmed' WHERE (event_a=? AND event_b=?) OR (event_a=? AND event_b=?)").run(repId, otherId, otherId, repId);
+      await d.prepare("UPDATE duplicate_candidates SET status='confirmed' WHERE (event_a=? AND event_b=?) OR (event_a=? AND event_b=?)").run(repId, otherId, otherId, repId);
     // 병합된 사건에 걸려 있던 다른 후보는 대표 사건 기준으로 다시 계산
-    d.prepare("UPDATE duplicate_candidates SET status='dismissed' WHERE status='suggested' AND (event_a=? OR event_b=?)").run(otherId, otherId);
-    const rows = d.prepare('SELECT id FROM summary_statements WHERE event_id=? ORDER BY position, created_at').all(repId) as { id: string }[];
-    rows.forEach((r, i) => d.prepare('UPDATE summary_statements SET position=? WHERE id=?').run(i + 1, r.id));
+    await d.prepare("UPDATE duplicate_candidates SET status='dismissed' WHERE status='suggested' AND (event_a=? OR event_b=?)").run(otherId, otherId);
+    const rows = await d.prepare('SELECT id FROM summary_statements WHERE event_id=? ORDER BY position, created_at').all<{ id: string }>(repId);
+    let i = 0;
+    for (const r of rows) await d.prepare('UPDATE summary_statements SET position=? WHERE id=?').run(++i, r.id);
     // 병합으로 한 사건에 합쳐지면 충돌 표시는 합산
-    if (oth.content_conflict) d.prepare('UPDATE events SET content_conflict=1 WHERE id=?').run(repId);
-  })();
-  recomputeEvent(repId);
-  revalidateFacts(repId);
-  findDuplicateCandidates(repId);
+    if (oth.content_conflict) await d.prepare('UPDATE events SET content_conflict=1 WHERE id=?').run(repId);
+  });
+  await recomputeEvent(repId);
+  await revalidateFacts(repId);
+  await findDuplicateCandidates(repId);
 }
 
 export { round3 };

@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 export const POST = read(async (req) => {
   const b = await body<{ ids: string[]; title?: string }>(req);
   const set = new Set(b.ids ?? []);
-  const rows = listEventRows().filter((e) => set.has(e.id));
-  const kml = buildKml(rows, b.title ?? 'ARGUS-K');
+  const rows = (await listEventRows()).filter((e) => set.has(e.id));
+  const kml = await buildKml(rows, b.title ?? 'ARGUS-K');
   return new Response(kml, { headers: { 'Content-Type': 'application/vnd.google-earth.kml+xml; charset=utf-8' } });
 });

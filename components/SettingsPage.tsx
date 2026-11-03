@@ -61,7 +61,7 @@ export default function SettingsPage() {
     });
 
   if (!s) return <div className="p-6 text-gray-500">{err ?? '불러오는 중...'}</div>;
-  const nextRun = s.cron === '0 7 * * *' ? '매일 07:00 KST' : `cron "${s.cron}"`;
+  const nextRun = '매일 07:00 KST (Vercel Cron, 최대 1시간 이내 지연 가능)';
   const last = s.runs[0];
 
   return (
@@ -73,13 +73,12 @@ export default function SettingsPage() {
         <h2 className="mb-2 text-lg font-bold">1. 수집 실행</h2>
         <div className="flex flex-wrap items-center gap-3">
           <button className="btn btn-primary" disabled={!!busy || s.collecting} onClick={collect}>{busy === 'collect' || s.collecting ? '수집 중... (최대 몇 분)' : '지금 수집'}</button>
-          <span className="text-sm text-gray-700">다음 예약: {nextRun} (앱이 실행 중일 때만 동작)</span>
+          <span className="text-sm text-gray-700">다음 예약: {nextRun}</span>
           <span className="text-sm text-gray-700">마지막 실행: {last ? `${fmtKst(last.started_at)} · ${last.status} · 신규 ${last.new_articles}건` : '없음'}</span>
         </div>
         <label className="mt-2 flex items-center gap-2 text-sm">
           <input type="checkbox" checked={s.live.on} onChange={(e) => run('live', () => api('/api/settings', { method: 'PATCH', body: { live: e.target.checked } }))} />
-          실시간 자동 수집 — 앱이 켜져 있는 동안 {s.live.interval_min > 0 ? `${s.live.interval_min}분마다` : '(LIVE_INTERVAL_MIN=0 으로 꺼져 있음)'} 자동 수집
-          {!s.live.active && <span className="text-xs text-amber-700">(개발 모드에서는 동작하지 않음)</span>}
+          실시간 자동 수집 — 상황판 화면이 열려 있는 동안 {s.live.interval_min > 0 ? `${s.live.interval_min}분마다` : '(LIVE_INTERVAL_MIN=0 으로 꺼져 있음)'} 자동 수집
         </label>
         <div className="mt-2 flex items-center gap-2">
           <button className="btn btn-sm" disabled={!!busy} onClick={() => run('tr', async () => { const r = await api<any>('/api/translate', { method: 'POST' }); setMsg(`제목 번역: ${r.translated}건 완료, 실패 ${r.failed}건, 남음 ${r.left}건`); })}>{busy === 'tr' ? '번역 중...' : '기사 제목 번역 지금 실행'}</button>
@@ -172,13 +171,11 @@ export default function SettingsPage() {
       <section className="card p-4">
         <h2 className="mb-2 text-lg font-bold">6. 저장소</h2>
         <dl className="grid grid-cols-[8rem_1fr] gap-y-1 text-sm">
-          <dt className="text-gray-600">DB 파일</dt><dd className="break-all">{s.storage.path}</dd>
-          <dt className="text-gray-600">크기</dt><dd>{(s.storage.size / 1024).toFixed(0)} KB</dd>
-          <dt className="text-gray-600">백업 폴더</dt><dd className="break-all">{s.storage.backup_dir} ({s.storage.backup_count}개, 최근 14개 보관)</dd>
-          <dt className="text-gray-600">마지막 백업</dt><dd>{s.storage.last_backup_at ? fmtKst(s.storage.last_backup_at) : '없음'}</dd>
-          <dt className="text-gray-600">실행 모드</dt><dd>{s.mode === 'lan' ? '내부망 공유 모드' : '로컬 모드'}</dd>
+          <dt className="text-gray-600">데이터베이스</dt><dd className="break-all">{s.storage.label}</dd>
+          <dt className="text-gray-600">저장된 건수</dt><dd>사건 {s.storage.events}건 · 기사 {s.storage.articles}건</dd>
+          <dt className="text-gray-600">실행 모드</dt><dd>{s.mode === 'lan' ? '공유 모드 (쓰기에 PIN 필요)' : '로컬 모드'}</dd>
         </dl>
-        <button className="btn mt-2" disabled={!!busy} onClick={() => run('backup', async () => { await api('/api/backup', { method: 'POST' }); setMsg('백업했습니다'); })}>지금 백업</button>
+        <p className="mt-2 text-xs text-gray-500">백업은 Supabase 대시보드(Database → Backups)에서 관리합니다.</p>
       </section>
     </div>
   );

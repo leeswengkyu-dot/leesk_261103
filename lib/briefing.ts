@@ -47,30 +47,48 @@ export function emptyContent(): BContent {
   return { summary: [], regions: REGION_KEYS.map((region) => ({ region, sentences: [] })), changes: [], watch: [], sources: [] };
 }
 
-function reviewedEvents(ids: string[]) {
+async function reviewedEvents(ids: string[]): Promise<Record<string, unknown>[]> {
   if (!ids.length) return [];
   const ph = ids.map(() => '?').join(',');
-  return db().prepare(`SELECT * FROM events WHERE id IN (${ph}) AND review_status='reviewed'`).all(...ids) as Record<string, unknown>[];
+  return db().prepare(`SELECT * FROM events WHERE id IN (${ph}) AND review_status='reviewed'`).all(...ids);
 }
 
-function buildSources(eventIds: string[]): BSource[] {
+/** 초안 작성 중 DB 를 다시 읽지 않도록 미리 읽어 둔 관계 */
+interface Rel {
+  stArts: Map<string, string[]>;
+  artEvent: Map<string, string>;
+}
+
+async function loadRel(eventIds: string[]): Promise<Rel> {
+  const rel: Rel = { stArts: new Map(), artEvent: new Map() };
+  if (!eventIds.length) return rel;
+  const ph = eventIds.map(() => '?').join(',');
+  for (const r of await db().prepare(`SELECT id, event_id FROM articles WHERE event_id IN (${ph})`).all<{ id: string; event_id: string }>(...eventIds)) rel.artEvent.set(r.id, r.event_id);
+  const rows = await db()
+    .prepare(`SELECT ss.statement_id, ss.article_id FROM statement_sources ss JOIN summary_statements s ON s.id=ss.statement_id WHERE s.event_id IN (${ph})`)
+    .all<{ statement_id: string; article_id: string }>(...eventIds);
+  for (const r of rows) rel.stArts.set(r.statement_id, [...(rel.stArts.get(r.statement_id) ?? []), r.article_id]);
+  return rel;
+}
+
+async function buildSources(eventIds: string[]): Promise<BSource[]> {
   if (!eventIds.length) return [];
   const ph = eventIds.map(() => '?').join(',');
-  const arts = db().prepare(`SELECT * FROM articles WHERE event_id IN (${ph}) ORDER BY published_at ASC`).all(...eventIds) as ArticleRow[];
+  const arts = await db().prepare(`SELECT * FROM articles WHERE event_id IN (${ph}) ORDER BY published_at ASC`).all<ArticleRow>(...eventIds);
   return arts.map((a, i) => ({ n: i + 1, article_id: a.id, source_name: a.source_name, source_grade: a.source_grade, url: a.url, title: a.title, published_at: a.published_at }));
 }
 
-function stmtSources(stId: string, srcs: BSource[]): number[] {
-  const ids = (db().prepare('SELECT article_id FROM statement_sources WHERE statement_id=?').all(stId) as { article_id: string }[]).map((r) => r.article_id);
+function stmtSources(stId: string, srcs: BSource[], rel: Rel): number[] {
+  const ids = rel.stArts.get(stId) ?? [];
   return srcs.filter((s) => ids.includes(s.article_id)).map((s) => s.n);
 }
 
 /** 규칙 기반 초안 (AI 없이도 승인된 문장만으로 구성) */
-function ruleDraft(events: Record<string, unknown>[], sts: StRow[], srcs: BSource[]): BContent {
+function ruleDraft(events: Record<string, unknown>[], sts: StRow[], srcs: BSource[], rel: Rel): BContent {
   const c = emptyContent();
   c.sources = srcs;
   const evBy = new Map(events.map((e) => [e.id as string, e]));
-  const mk = (s: StRow, text?: string): BSentence => ({ id: sid(), text: text ?? s.text, label: s.label, source_numbers: stmtSources(s.id, srcs), event_ids: [s.event_id] });
+  const mk = (s: StRow, text?: string): BSentence => ({ id: sid(), text: text ?? s.text, label: s.label, source_numbers: stmtSources(s.id, srcs, rel), event_ids: [s.event_id] });
   const used = new Set<string>();
   const relRank = (id: string) => ({ high: 0, medium: 1, low: 2 }[(evBy.get(id)?.reliability as string) ?? 'low'] ?? 2);
 
@@ -91,7 +109,7 @@ function ruleDraft(events: Record<string, unknown>[], sts: StRow[], srcs: BSourc
     if (ct === 'continuing') continue;
     const first = sts.find((s) => s.event_id === e.id);
     if (!first) continue;
-    c.changes.push({ id: sid(), text: `[${CHANGE_TYPES[ct]}] ${e.title as string}`, label: first.label, source_numbers: stmtSources(first.id, srcs), event_ids: [e.id as string] });
+    c.changes.push({ id: sid(), text: `[${CHANGE_TYPES[ct]}] ${e.title as string}`, label: first.label, source_numbers: stmtSources(first.id, srcs, rel), event_ids: [e.id as string] });
   }
   for (const s of sts) {
     if (used.has(s.id)) continue;
@@ -99,7 +117,7 @@ function ruleDraft(events: Record<string, unknown>[], sts: StRow[], srcs: BSourc
   }
   for (const e of events) {
     if (!e.content_conflict && !e.location_conflict) continue;
-    const arts = srcs.filter((x) => (db().prepare('SELECT event_id FROM articles WHERE id=?').get(x.article_id) as { event_id: string } | undefined)?.event_id === e.id);
+    const arts = srcs.filter((x) => rel.artEvent.get(x.article_id) === e.id);
     if (!arts.length) continue;
     const why = [e.content_conflict ? '내용' : '', e.location_conflict ? '위치' : ''].filter(Boolean).join('·');
     c.watch.push({ id: sid(), text: `출처 간 ${why} 충돌: ${e.title as string} (${arts.map((a) => a.source_name).join(', ')})`, label: 'unverified', source_numbers: arts.map((a) => a.n), event_ids: [e.id as string] });
@@ -108,7 +126,7 @@ function ruleDraft(events: Record<string, unknown>[], sts: StRow[], srcs: BSourc
 }
 
 /** T4 결과를 서버에서 검증·정리. 라벨은 참조한 문장 중 가장 약한 라벨로 강제한다. */
-function applyT4(out: ReturnType<typeof T4Schema.parse>, events: Record<string, unknown>[], sts: StRow[], srcs: BSource[]): BContent {
+function applyT4(out: ReturnType<typeof T4Schema.parse>, events: Record<string, unknown>[], sts: StRow[], srcs: BSource[], rel: Rel): BContent {
   const c = emptyContent();
   c.sources = srcs;
   const byId = new Map(sts.map((s) => [s.id, s]));
@@ -116,7 +134,7 @@ function applyT4(out: ReturnType<typeof T4Schema.parse>, events: Record<string, 
     const refs = x.statement_ids.map((i) => byId.get(i)).filter(Boolean) as StRow[];
     if (!refs.length) return null;
     const label = refs.reduce((m, s) => (RANK[s.label] < RANK[m] ? s.label : m), refs[0].label);
-    const nums = [...new Set(refs.flatMap((s) => stmtSources(s.id, srcs)))].sort((a, b) => a - b);
+    const nums = [...new Set(refs.flatMap((s) => stmtSources(s.id, srcs, rel)))].sort((a, b) => a - b);
     if (!nums.length) return null;
     return { id: sid(), text: x.text, label, source_numbers: nums, event_ids: [...new Set(refs.map((s) => s.event_id))] };
   };
@@ -127,18 +145,19 @@ function applyT4(out: ReturnType<typeof T4Schema.parse>, events: Record<string, 
   }
   c.watch = out.watch.map(conv).filter((x): x is BSentence => !!x);
   // 전일 대비 변화는 서버가 결정적으로 구성
-  c.changes = ruleDraft(events, sts, srcs).changes;
+  c.changes = ruleDraft(events, sts, srcs, rel).changes;
   return c;
 }
 
 export async function generateDraft(eventIds: string[], opts: { actor?: string | null } = {}) {
-  const events = reviewedEvents(eventIds);
+  const events = await reviewedEvents(eventIds);
   if (!events.length) throw new ValidationError('검토 완료된 사건이 없어 초안을 만들 수 없습니다');
   const ids = events.map((e) => e.id as string);
   const ph = ids.map(() => '?').join(',');
-  const srcs = buildSources(ids);
+  const srcs = await buildSources(ids);
+  const rel = await loadRel(ids);
   // 출처가 없는 문장은 초안에 넣지 않는다 (게시 검증에서 어차피 거부됨)
-  const sts = (db().prepare(`SELECT id,event_id,text,label,fact_suggested,position FROM summary_statements WHERE event_id IN (${ph}) ORDER BY event_id, position`).all(...ids) as StRow[]).filter((s) => stmtSources(s.id, srcs).length > 0);
+  const sts = (await db().prepare(`SELECT id,event_id,text,label,fact_suggested,position FROM summary_statements WHERE event_id IN (${ph}) ORDER BY event_id, position`).all<StRow>(...ids)).filter((s) => stmtSources(s.id, srcs, rel).length > 0);
   let content: BContent;
   let note: string | null = null;
   let usedAi = false;
@@ -151,35 +170,35 @@ export async function generateDraft(eventIds: string[], opts: { actor?: string |
       문장: sts.filter((s) => s.event_id === e.id).map((s) => ({ statement_id: s.id, 라벨: s.fact_suggested && s.label !== 'fact' ? 'unverified' : s.label, 문장: s.text })),
     }));
     const out = await aiJson(T4_SYSTEM, JSON.stringify(input), T4Schema);
-    content = applyT4(out, events, sts, srcs);
+    content = applyT4(out, events, sts, srcs, rel);
     usedAi = true;
   } catch (e) {
-    content = ruleDraft(events, sts, srcs);
+    content = ruleDraft(events, sts, srcs, rel);
     note = `AI 초안을 만들지 못해 승인된 문장으로 규칙 기반 초안을 만들었습니다 (${(e as Error).message.slice(0, 80)})`;
   }
-  const row = saveDraftRow(content, ids);
+  const row = await saveDraftRow(content, ids);
   void opts;
   return { id: row, usedAi, note };
 }
 
-export function blankDraft(eventIds: string[]) {
-  const events = reviewedEvents(eventIds);
+export async function blankDraft(eventIds: string[]) {
+  const events = await reviewedEvents(eventIds);
   const ids = events.map((e) => e.id as string);
   const c = emptyContent();
-  c.sources = buildSources(ids);
-  return { id: saveDraftRow(c, ids) };
+  c.sources = await buildSources(ids);
+  return { id: await saveDraftRow(c, ids) };
 }
 
-function saveDraftRow(content: BContent, eventIds: string[]): string {
+async function saveDraftRow(content: BContent, eventIds: string[]): Promise<string> {
   const d = db();
-  const ex = d.prepare("SELECT id FROM briefings WHERE status='draft' ORDER BY created_at DESC LIMIT 1").get() as { id: string } | undefined;
+  const ex = await d.prepare("SELECT id FROM briefings WHERE status='draft' ORDER BY created_at DESC LIMIT 1").get<{ id: string }>();
   const now = nowIso();
   if (ex) {
-    d.prepare('UPDATE briefings SET content=?, event_ids=?, briefing_date=?, created_at=? WHERE id=?').run(JSON.stringify(content), JSON.stringify(eventIds), kstDate(), now, ex.id);
+    await d.prepare('UPDATE briefings SET content=?, event_ids=?, briefing_date=?, created_at=? WHERE id=?').run(JSON.stringify(content), JSON.stringify(eventIds), kstDate(), now, ex.id);
     return ex.id;
   }
   const id = uuid();
-  d.prepare("INSERT INTO briefings (id,status,briefing_date,content,event_ids,created_at) VALUES (?,'draft',?,?,?,?)").run(id, kstDate(), JSON.stringify(content), JSON.stringify(eventIds), now);
+  await d.prepare("INSERT INTO briefings (id,status,briefing_date,content,event_ids,created_at) VALUES (?,'draft',?,?,?,?)").run(id, kstDate(), JSON.stringify(content), JSON.stringify(eventIds), now);
   return id;
 }
 
@@ -189,9 +208,9 @@ export interface Violation {
 }
 
 /** FR-F3-13 게시 전 검증 + F2 규칙 재적용 */
-export function validateBriefing(content: BContent, eventIds: string[]): Violation[] {
+export async function validateBriefing(content: BContent, eventIds: string[]): Promise<Violation[]> {
   const v: Violation[] = [];
-  const reviewed = new Set((reviewedEvents(eventIds)).map((e) => e.id as string));
+  const reviewed = new Set((await reviewedEvents(eventIds)).map((e) => e.id as string));
   for (const id of eventIds) if (!reviewed.has(id)) v.push({ sentence_id: null, reason: `검토 완료가 아닌 사건이 포함되어 있습니다 (${id.slice(0, 8)})` });
   const srcBy = new Map(content.sources.map((s) => [s.n, s]));
   const all: [string, BSentence][] = [
@@ -210,7 +229,11 @@ export function validateBriefing(content: BContent, eventIds: string[]): Violati
     for (const eid of s.event_ids) if (!reviewed.has(eid)) v.push({ sentence_id: s.id, reason: '검토 완료가 아닌 사건을 참조합니다' });
     if (sec === 'summary' && !SUMMARY_ALLOWED_LABELS.includes(s.label)) v.push({ sentence_id: s.id, reason: '종합에는 [사실]과 [당사자 주장]만 쓸 수 있습니다' });
     if (s.label === 'fact') {
-      const arts = nums.map((n) => db().prepare('SELECT * FROM articles WHERE id=?').get(srcBy.get(n)!.article_id) as ArticleRow).filter(Boolean);
+      const arts: ArticleRow[] = [];
+      for (const n of nums) {
+        const a = await db().prepare('SELECT * FROM articles WHERE id=?').get<ArticleRow>(srcBy.get(n)!.article_id);
+        if (a) arts.push(a);
+      }
       const chk = checkFact(arts, true);
       if (!chk.ok) v.push({ sentence_id: s.id, reason: `[사실] 조건 미충족: ${chk.reason}` });
     }
@@ -218,15 +241,15 @@ export function validateBriefing(content: BContent, eventIds: string[]): Violati
   return v;
 }
 
-export function publishBriefing(id: string, by: string | null) {
+export async function publishBriefing(id: string, by: string | null) {
   const d = db();
-  const b = d.prepare("SELECT * FROM briefings WHERE id=? AND status='draft'").get(id) as { content: string; event_ids: string } | undefined;
+  const b = await d.prepare("SELECT * FROM briefings WHERE id=? AND status='draft'").get<{ content: string; event_ids: string }>(id);
   if (!b) throw new ValidationError('초안을 찾을 수 없습니다');
   const content = JSON.parse(b.content) as BContent;
   const eventIds = JSON.parse(b.event_ids) as string[];
-  const violations = validateBriefing(content, eventIds);
+  const violations = await validateBriefing(content, eventIds);
   if (violations.length) return { ok: false as const, violations };
   const now = nowIso();
-  d.prepare("UPDATE briefings SET status='published', published_at=?, published_by=?, briefing_date=? WHERE id=?").run(now, by || null, kstDate(), id);
+  await d.prepare("UPDATE briefings SET status='published', published_at=?, published_by=?, briefing_date=? WHERE id=?").run(now, by || null, kstDate(), id);
   return { ok: true as const, published_at: now };
 }

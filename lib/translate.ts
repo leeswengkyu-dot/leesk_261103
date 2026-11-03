@@ -55,7 +55,7 @@ async function viaGoogle(titles: string[]): Promise<string[]> {
 async function translateBatch(titles: string[]): Promise<string[]> {
   const p = provider();
   if (p === 'off') return titles.map(() => '');
-  if ((p === 'auto' || p === 'claude') && aiStatus().available) {
+  if ((p === 'auto' || p === 'claude') && (await aiStatus()).available) {
     try {
       return await viaClaude(titles);
     } catch (e) {
@@ -80,15 +80,13 @@ export async function translatePending(limit = 150): Promise<TranslateResult> {
   try {
     const d = db();
     // 한글 제목은 번역 대상이 아님: 원문을 그대로 두어 다시 검사하지 않게 한다
-    const all = d.prepare('SELECT id, title, event_id FROM articles WHERE title_ko IS NULL ORDER BY published_at DESC').all() as { id: string; title: string; event_id: string | null }[];
+    const all = await d.prepare('SELECT id, title, event_id FROM articles WHERE title_ko IS NULL ORDER BY published_at DESC').all<{ id: string; title: string; event_id: string | null }>();
     const setKo = d.prepare('UPDATE articles SET title_ko=? WHERE id=?');
-    const todo = all.filter((r) => {
-      if (hasHangul(r.title)) {
-        setKo.run(r.title, r.id);
-        return false;
-      }
-      return true;
-    });
+    const todo: typeof all = [];
+    for (const r of all) {
+      if (hasHangul(r.title)) await setKo.run(r.title, r.id);
+      else todo.push(r);
+    }
     res.left = Math.max(0, todo.length - limit);
     const work = todo.slice(0, limit);
     const setEv = d.prepare('UPDATE events SET title_ko=? WHERE id=? AND title=?');
@@ -101,16 +99,17 @@ export async function translatePending(limit = 150): Promise<TranslateResult> {
         res.failed += batch.length;
         continue;
       }
-      batch.forEach((b, k) => {
+      for (let k = 0; k < batch.length; k++) {
+        const b = batch[k];
         const t = (tr[k] ?? '').trim();
         if (!t) {
           res.failed++;
-          return;
+          continue;
         }
-        setKo.run(t, b.id);
-        if (b.event_id) setEv.run(t, b.event_id, b.title);
+        await setKo.run(t, b.id);
+        if (b.event_id) await setEv.run(t, b.event_id, b.title);
         res.translated++;
-      });
+      }
     }
   } finally {
     g.__argusTranslating = false;

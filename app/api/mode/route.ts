@@ -9,6 +9,6 @@ export function GET() {
 }
 
 /** PIN 확인용 (클라이언트가 입력한 PIN 이 맞는지 검사) */
-export function POST(req: Request) {
-  return requireWrite(req) ?? NextResponse.json({ ok: true });
+export async function POST(req: Request) {
+  return (await requireWrite(req)) ?? NextResponse.json({ ok: true });
 }

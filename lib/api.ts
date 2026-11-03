@@ -9,7 +9,7 @@ type Ctx<P> = { params: Promise<P> };
 /** 쓰기 라우트 공통 래퍼: PIN 확인 → 실행 → 오류를 JSON 으로 변환 */
 export function write<P = Record<string, never>>(fn: (req: Request, ctx: Ctx<P>) => Promise<unknown> | unknown) {
   return async (req: Request, ctx: Ctx<P>) => {
-    const denied = requireWrite(req);
+    const denied = await requireWrite(req);
     if (denied) return denied;
     return run(() => fn(req, ctx));
   };
@@ -30,7 +30,7 @@ async function run(fn: () => Promise<unknown> | unknown) {
     if (e instanceof AiUnavailable) return NextResponse.json({ error: e.message, code: e.code }, { status: 503 });
     const msg = (e as Error).message || '알 수 없는 오류';
     console.error('[api]', e);
-    const full = /ENOSPC|SQLITE_FULL/.test(msg);
+    const full = /ENOSPC|disk full|No space left/i.test(msg);
     return NextResponse.json({ error: full ? '저장 공간이 부족합니다' : msg }, { status: 500 });
   }
 }

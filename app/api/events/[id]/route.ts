@@ -11,7 +11,7 @@ type P = { id: string };
 
 export const GET = read<P>(async (_req, { params }) => {
   const { id } = await params;
-  const det = getEventDetail(id);
+  const det = await getEventDetail(id);
   if (!det) throw new ValidationError('사건을 찾을 수 없습니다');
   return det;
 });
@@ -21,7 +21,7 @@ export const PATCH = write<P>(async (req, { params }) => {
   const { id } = await params;
   const b = await body<Record<string, unknown>>(req);
   const d = db();
-  const ev = d.prepare('SELECT * FROM events WHERE id=?').get(id) as Record<string, unknown> | undefined;
+  const ev = await d.prepare('SELECT * FROM events WHERE id=?').get(id);
   if (!ev) throw new ValidationError('사건을 찾을 수 없습니다');
   if (b.expected_updated_at && b.expected_updated_at !== ev.updated_at) {
     return Response.json({ error: '다른 사용자가 먼저 수정했습니다. 새로 불러올까요?', code: 'conflict' }, { status: 409 });
@@ -29,8 +29,12 @@ export const PATCH = write<P>(async (req, { params }) => {
   const sets: string[] = [];
   const vals: unknown[] = [];
   const put = (col: string, v: unknown) => {
-    sets.push(`${col}=?`);
-    vals.push(v);
+    const k = sets.indexOf(`${col}=?`); // 같은 컬럼을 두 번 지정하면 Postgres 가 거부하므로 마지막 값으로 덮어쓴다
+    if (k >= 0) vals[k] = v;
+    else {
+      sets.push(`${col}=?`);
+      vals.push(v);
+    }
   };
   if (typeof b.title === 'string') {
     if (!b.title.trim()) throw new ValidationError('제목을 입력하세요');
@@ -74,9 +78,9 @@ export const PATCH = write<P>(async (req, { params }) => {
   if ('conflict_note' in b) put('conflict_note', (b.conflict_note as string) || null);
   if (!sets.length) return { ok: true };
   put('updated_at', nowIso());
-  d.prepare(`UPDATE events SET ${sets.join(', ')} WHERE id=?`).run(...vals, id);
-  recomputeEvent(id);
-  if ('region' in b || 'event_type' in b) findDuplicateCandidates(id);
+  await d.prepare(`UPDATE events SET ${sets.join(', ')} WHERE id=?`).run(...vals, id);
+  await recomputeEvent(id);
+  if ('region' in b || 'event_type' in b) await findDuplicateCandidates(id);
   return { ok: true };
 });
 
@@ -88,24 +92,24 @@ export const POST = write<P>(async (req, { params }) => {
   const now = nowIso();
   switch (b.action) {
     case 'review': {
-      const blockers = reviewBlockers(id);
+      const blockers = await reviewBlockers(id);
       if (blockers.length) throw new ValidationError(blockers.join(' / '));
       if (!b.confirmed) throw new ValidationError('위치·유형·라벨·출처를 확인했다는 체크가 필요합니다');
-      d.prepare("UPDATE events SET review_status='reviewed', reviewed_by=?, reviewed_at=?, updated_at=? WHERE id=? AND review_status IN ('collected','reviewed')").run(b.reviewer?.trim() || null, now, now, id);
+      await d.prepare("UPDATE events SET review_status='reviewed', reviewed_by=?, reviewed_at=?, updated_at=? WHERE id=? AND review_status IN ('collected','reviewed')").run(b.reviewer?.trim() || null, now, now, id);
       return { ok: true };
     }
     case 'unreview':
-      d.prepare("UPDATE events SET review_status='collected', reviewed_at=NULL, reviewed_by=NULL, updated_at=? WHERE id=? AND review_status='reviewed'").run(now, id);
+      await d.prepare("UPDATE events SET review_status='collected', reviewed_at=NULL, reviewed_by=NULL, updated_at=? WHERE id=? AND review_status='reviewed'").run(now, id);
       return { ok: true };
     case 'reject':
-      d.prepare("UPDATE events SET review_status='rejected', updated_at=? WHERE id=?").run(now, id);
+      await d.prepare("UPDATE events SET review_status='rejected', updated_at=? WHERE id=?").run(now, id);
       return { ok: true };
     case 'restore':
-      d.prepare("UPDATE events SET review_status='collected', updated_at=? WHERE id=? AND review_status='rejected'").run(now, id);
+      await d.prepare("UPDATE events SET review_status='collected', updated_at=? WHERE id=? AND review_status='rejected'").run(now, id);
       return { ok: true };
     case 'ai_summary': {
       const n = await generateSummary(id);
-      recomputeEvent(id);
+      await recomputeEvent(id);
       return { ok: true, count: n };
     }
     case 'ai_conflict': {
