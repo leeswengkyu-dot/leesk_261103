@@ -113,6 +113,11 @@ function Layers({ events, selectedId, onSelect, region, fitAll, numbers }: Props
     overlay.addTo(map);
     clusterRef.current = cluster;
     overlayRef.current = overlay;
+    // 마커를 누르면 선택 상태가 바뀌어 마커를 다시 그리므로 팝업이 닫힌다 → 선택된 마커가 보이면 팝업을 다시 연다
+    if (selectedId) {
+      const selM = markersRef.current.get(selectedId);
+      if (selM && cluster.getVisibleParent(selM) === selM) selM.openPopup();
+    }
     return () => {
       cluster.remove();
       overlay.remove();
