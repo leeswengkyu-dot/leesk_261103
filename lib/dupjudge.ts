@@ -55,7 +55,8 @@ async function judgeGroup(baseId: string, cands: Cand[]): Promise<number> {
     const c = list[r.number - 1];
     if (!c) continue; // 존재하지 않는 번호는 버린다
     const conf = Math.round(Math.max(0, Math.min(1, r.confidence > 1 ? r.confidence / 100 : r.confidence)) * 100);
-    await upd.run(r.verdict, conf, r.reason.slice(0, 300), now, c.id);
+    const reason = r.reason.replace(/후보\s*\d+\s*(은|는|이|가|의)?\s*/g, '상대 보도$1 ').replace(/기준\s*사건(은|는|이|가|의)?/g, '이 사건$1').replace(/\s+/g, ' ').trim();
+    await upd.run(r.verdict, conf, reason.slice(0, 300), now, c.id);
     n++;
   }
   return n;
