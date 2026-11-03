@@ -4,7 +4,7 @@ import { aiJson, aiStatus } from './ai/provider';
 
 /**
  * 기사 제목 한글 번역 (원문은 그대로 두고 title_ko 에 따로 저장).
- * TRANSLATE_PROVIDER: auto(기본: Claude 가능하면 Claude, 아니면 무료 웹 번역) | claude | google | off
+ * TRANSLATE_PROVIDER: auto(기본: AI(Gemini/Claude) 가능하면 AI, 아니면 무료 웹 번역) | claude(=AI) | google | off
  */
 const g = globalThis as unknown as { __argusTranslating?: boolean };
 
