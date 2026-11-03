@@ -4,6 +4,7 @@ import { nowIso, parseTime } from './time';
 import { processPendingArticles } from './ingest';
 import { translatePending } from './translate';
 import { judgePendingDuplicates } from './dupjudge';
+import { reanalyzePending } from './reanalyze';
 
 /** 수집 한 번의 최대 시간(ms). 서버리스 함수 제한 안에서 끝내기 위해 기사 처리를 이 안에서 멈춘다 */
 const BUDGET_MS = 200_000;
@@ -161,6 +162,15 @@ export async function runCollection(trigger: 'cron' | 'catchup' | 'manual' | 'li
       console.error('[translate] 번역 실패:', (e as Error).message);
     }
     aiNote = pr.aiNote;
+    // 키워드 규칙으로 만들어진 기존 사건을 AI 로 재분석 (경보 사건부터 몇 건씩)
+    try {
+      if (Date.now() < deadline) {
+        const ra = await reanalyzePending({ deadline });
+        if (ra.note && !aiNote) aiNote = ra.note;
+      }
+    } catch (e) {
+      console.error('[reanalyze] 재분석 실패:', (e as Error).message);
+    }
     // 중복 후보 AI 1차 판단 (아직 판단 안 한 후보를 몇 건씩)
     try {
       if (Date.now() < deadline) {

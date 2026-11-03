@@ -57,7 +57,7 @@ export async function listEventRows(): Promise<EventRow[]> {
     ptsBy.set(a.event_id, l);
   }
   const dupCnt = new Map<string, number>();
-  for (const r of await d.prepare("SELECT event_a, event_b FROM duplicate_candidates WHERE status='suggested'").all<{ event_a: string; event_b: string }>()) {
+  for (const r of await d.prepare("SELECT event_a, event_b FROM duplicate_candidates WHERE status='suggested' AND (ai_verdict IS NULL OR ai_verdict<>'different')").all<{ event_a: string; event_b: string }>()) {
     dupCnt.set(r.event_a, (dupCnt.get(r.event_a) ?? 0) + 1);
     dupCnt.set(r.event_b, (dupCnt.get(r.event_b) ?? 0) + 1);
   }

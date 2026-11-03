@@ -14,17 +14,27 @@ export function guessRegion(text: string, feedRegion: string): string | null {
   return null;
 }
 
+// 미사일 발사: "미사일" 같은 단어만으로는 부족하고, 실제 발사·시험 행위를 뜻하는 표현이 함께 있어야 한다
+const LAUNCH_OBJ = /미사일|탄도|순항|발사체|방사포|탄두|집속탄|icbm|slbm|missile|projectile|ballistic|rocket|warhead/i;
+const LAUNCH_ACT = /발사(?!체|대|장)|시험(?!장)|시험사격|쏘아|쐈|fires?\b|fired|launch(es|ed|ing)?\b|test[- ]fir|\btest(s|ed)?\b/i;
+// 사설·분석·전망 기사 (사건 보도가 아님 → 기타)
+const ANALYSIS = /사설|칼럼|기고|분석|전망|해설|위협할 수|editorial|opinion|analysis|commentary|explainer/i;
+// 다른 나라를 비난·규탄하는 담화·성명 (경보 대상이 아님 → 공식 발표)
+const STATEMENT = /비난|규탄|반발|논평|담화|성명|condemn|slam|blast|criticiz|denounc/i;
+
 const TYPE_PATTERNS: [string, RegExp][] = [
-  ['missile_launch', /미사일|탄도|순항|발사체|발사|missile|icbm|rocket launch|ballistic/i],
-  ['nuclear', /핵|nuclear|uranium|enrichment|iaea|plutonium|영변/i],
-  ['armed_clash', /교전|충돌|공습|폭격|포격|총격|전투|airstrike|clash|shelling|attack|strike|drone attack|offensive/i],
+  ['nuclear', /핵(?!심)|nuclear|uranium|enrichment|iaea|plutonium|영변/i],
+  ['armed_clash', /교전|공습|폭격|포격|총격|전투|공격(?!적)|airstrike|clash|shelling|drone attack|missile attack|offensive|\battack(ed|s)?\b|\bstrikes? on\b/i],
   ['military_exercise', /훈련|연합연습|기동|exercise|drill|maneuver/i],
   ['sanctions', /제재|sanction/i],
-  ['diplomacy', /회담|정상|외교|협상|담판|summit|talks|diplomat|negotiat|ceasefire|휴전/i],
-  ['official_statement', /담화|성명|발표|statement|spokesperson|announce/i],
+  ['diplomacy', /회담|정상|외교|협상|담판|방중|방러|방북|summit|talks|diplomat|negotiat|ceasefire|휴전/i],
+  ['official_statement', /발표|statement|spokesperson|announce/i],
 ];
 
 export function guessEventType(text: string): string {
+  if (ANALYSIS.test(text)) return 'other';
+  if (LAUNCH_OBJ.test(text) && LAUNCH_ACT.test(text) && !STATEMENT.test(text)) return 'missile_launch';
+  if (STATEMENT.test(text)) return 'official_statement';
   for (const [t, re] of TYPE_PATTERNS) if (re.test(text) && EVENT_TYPES[t]) return t;
   return 'other';
 }

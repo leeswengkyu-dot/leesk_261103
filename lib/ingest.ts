@@ -44,7 +44,7 @@ export async function insertEvent(n: NewEvent): Promise<string> {
 }
 
 /** AI 추출 결과 검증 (좌표 경계, 부대·개인 위치) */
-function sanitizeT1(t: T1, region: string): T1 {
+export function sanitizeT1(t: T1, region: string): T1 {
   const o = { ...t };
   let lat = o.lat ?? null;
   let lng = o.lng ?? null;
