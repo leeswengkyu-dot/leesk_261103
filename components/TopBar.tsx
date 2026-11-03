@@ -4,13 +4,13 @@ import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { fmtKst } from '@/lib/time';
-import { api, getPin, setPin } from '@/lib/client/api';
+import { api, getPin, setPin, requestPin } from '@/lib/client/api';
 
 export default function TopBar() {
   const path = usePathname();
   const sp = useSearchParams();
   const [now, setNow] = useState('');
-  const [mode, setMode] = useState<'local' | 'lan' | null>(null);
+  const [mode, setMode] = useState<'local' | 'lan' | 'web' | null>(null);
   const [hasPin, setHasPin] = useState(false);
   const [boardQuery, setBoardQuery] = useState('');
   const [present, setPresent] = useState(false);
@@ -23,7 +23,7 @@ export default function TopBar() {
   }, []);
 
   useEffect(() => {
-    api<{ mode: 'local' | 'lan' }>('/api/mode').then((r) => setMode(r.mode)).catch(() => {});
+    api<{ mode: 'local' | 'lan' | 'web' }>('/api/mode').then((r) => setMode(r.mode)).catch(() => {});
     const upd = () => setHasPin(!!getPin());
     upd();
     window.addEventListener('argus-pin', upd);
@@ -73,32 +73,32 @@ export default function TopBar() {
         <div className="ml-auto flex items-center gap-3 text-xs">
           <span>{now} KST</span>
           {mode && (
-            <span className={`rounded px-2 py-0.5 font-semibold ${mode === 'lan' ? 'bg-amber-400 text-slate-900' : 'bg-slate-700'}`}>
-              {mode === 'lan' ? '내부망 공유 모드' : '로컬 모드'}
+            <span className={`rounded px-2 py-0.5 font-semibold ${mode === 'web' ? 'bg-sky-400 text-slate-900' : mode === 'lan' ? 'bg-amber-400 text-slate-900' : 'bg-slate-700'}`}>
+              {mode === 'web' ? '웹 배포 모드' : mode === 'lan' ? '내부망 공유 모드' : '로컬 모드'}
             </span>
           )}
-          {mode === 'lan' && (
+          {(mode === 'lan' || mode === 'web') && (
             <button
-              className="rounded border border-slate-500 px-2 py-0.5 hover:bg-slate-700"
+              className={`rounded border px-2 py-0.5 ${hasPin ? 'border-emerald-400 text-emerald-300 hover:bg-slate-700' : 'border-slate-400 hover:bg-slate-700'}`}
+              title={hasPin ? '누르면 PIN을 지웁니다' : '쓰기 작업용 공유 PIN 입력'}
               onClick={() => {
                 if (hasPin) {
-                  setPin('');
-                  window.dispatchEvent(new Event('argus-pin'));
-                } else {
-                  const p = window.prompt('공유 PIN을 입력하세요');
-                  if (p) {
-                    setPin(p.trim());
+                  if (window.confirm('저장된 PIN을 지울까요?')) {
+                    setPin('');
                     window.dispatchEvent(new Event('argus-pin'));
                   }
+                } else {
+                  void requestPin();
                 }
               }}
             >
-              PIN: {hasPin ? '입력됨 (해제)' : '미입력'}
+              {hasPin ? 'PIN 입력됨 ✓ (해제)' : 'PIN 입력'}
             </button>
           )}
         </div>
       </div>
       {mode === 'lan' && <div className="bg-amber-100 px-4 py-1 text-xs font-semibold text-amber-900">내부망 공유 모드 — 같은 네트워크에서 접속 가능합니다. 쓰기 작업에는 공유 PIN이 필요합니다.</div>}
+      {mode === 'web' && !hasPin && <div className="bg-sky-100 px-4 py-1 text-xs font-semibold text-sky-900">웹 배포 모드 — 누구나 볼 수 있고, 수집·편집·검토 같은 쓰기 작업에는 공유 PIN이 필요합니다 (오른쪽 위 &quot;PIN 입력&quot;).</div>}
       <div className="border-b border-amber-300 bg-amber-50 px-4 py-1 text-xs text-amber-900">
         공개정보 기반 분석지원 도구입니다. AI 결과는 반드시 검토하고, 최종 판단은 사람이 합니다. 사건 정보는 요약을 위해 외부 AI 서비스로 전송되므로 비공개 업무 내용을 입력하지 마십시오.
       </div>

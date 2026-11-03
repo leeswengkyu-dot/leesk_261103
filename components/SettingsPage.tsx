@@ -165,6 +165,17 @@ export default function SettingsPage() {
           <span>오늘 AI 호출: <b>{s.ai.used}</b> / {s.ai.limit}</span>
           <span>AI: {s.ai.provider === 'gemini' ? 'Gemini' : 'Claude'} · 모델: {s.ai.model ?? '(미설정)'}</span>
         </div>
+        <div className="mt-3 rounded border p-2 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <b>기존 사건 AI 재분석</b>
+            <span className="text-gray-600">AI 없이 키워드 규칙으로 만들어진 수집함 사건: <b>{s.reanalyze_left ?? 0}</b>건</span>
+            <button className="btn btn-sm" disabled={!!busy || !s.ai.available || !s.reanalyze_left} title={s.ai.available ? '' : s.ai.reason ?? ''} onClick={() => run('reanalyze', async () => {
+              const r = await api<any>('/api/settings', { method: 'POST', body: { action: 'reanalyze', max: 20 } });
+              setMsg(`재분석 ${r.done}건 완료 — 유형 변경 ${r.changedType}건, 위치 추가 ${r.located}건, 요약 초안 ${r.summarized}건${r.notRelevant ? `, 안보 무관 판단 ${r.notRelevant}건` : ''}${r.failed ? `, 실패 ${r.failed}건` : ''} · 남은 사건 ${r.left}건${r.note ? ` (${r.note})` : ''}`);
+            })}>{busy === 'reanalyze' ? '재분석 중… (최대 4분)' : '지금 20건 재분석'}</button>
+          </div>
+          <div className="mt-1 text-xs text-gray-500">사건 유형·위치·발생 시각·요약 초안([미확인])을 AI로 다시 채웁니다. 사람이 고친 좌표와 이미 있는 요약 문장은 그대로 둡니다. 수집 때마다 경보 사건부터 10건씩 자동으로도 처리됩니다. 1건당 AI 호출 1회.</div>
+        </div>
         {s.ai.reason && <div className="mt-2 rounded bg-amber-50 p-2 text-sm text-amber-900">{s.ai.reason}. AI 없이도 키워드 규칙으로 사건을 만들고, 요약은 직접 작성하거나 CSV(사전 생성 요약)로 넣을 수 있습니다.</div>}
       </section>
 
@@ -173,7 +184,7 @@ export default function SettingsPage() {
         <dl className="grid grid-cols-[8rem_1fr] gap-y-1 text-sm">
           <dt className="text-gray-600">데이터베이스</dt><dd className="break-all">{s.storage.label}</dd>
           <dt className="text-gray-600">저장된 건수</dt><dd>사건 {s.storage.events}건 · 기사 {s.storage.articles}건</dd>
-          <dt className="text-gray-600">실행 모드</dt><dd>{s.mode === 'lan' ? '공유 모드 (쓰기에 PIN 필요)' : '로컬 모드'}</dd>
+          <dt className="text-gray-600">실행 모드</dt><dd>{s.mode === 'web' ? '웹 배포 모드 (인터넷 공개 · 쓰기에 PIN 필요)' : s.mode === 'lan' ? '공유 모드 (쓰기에 PIN 필요)' : '로컬 모드'}</dd>
         </dl>
         <p className="mt-2 text-xs text-gray-500">백업은 Supabase 대시보드(Database → Backups)에서 관리합니다.</p>
       </section>
