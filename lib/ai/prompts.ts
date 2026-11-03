@@ -25,8 +25,14 @@ JSON 스키마:
  "occurred_at": string|null,     // ISO 8601. 기사에 명시된 경우에만
  "is_party_claim": boolean,      // 사건 행위 주체의 정부·관영매체가 발표한 내용인가 (예: 북한 관영매체의 발사 주장). 행위 주체가 아닌 정부(예: 한국 합참)의 발표는 false
  "unit_or_person_location": boolean, // 특정 부대나 개인의 위치·이동을 다루는 내용이면 true (이 경우 좌표는 null)
- "summary": string|null          // 제목·설명에 있는 내용만으로 쓴 한 문장 요약. 주체(누가 발표·보도했는지)를 밝힐 것
-}`;
+ "summary": string|null          // 제목·설명에 있는 내용만으로 쓴 한 문장 요약. 주체(누가 발표·보도했는지)를 밝힐 것. relevant 가 true 면 반드시 작성
+}
+event_type 판단 기준 (경보와 연결되므로 엄격하게):
+- missile_launch: 미사일·발사체를 실제로 발사(시험발사 포함)했다는 보도나 그런 발사를 했다는 당사자 주장일 때만. 미사일 개발·배치·전력 강화, 다른 나라 미사일에 대한 비난·논평, 발사 공지 방침, 위협 분석은 해당하지 않음
+- nuclear: 핵실험, 핵시설 가동·변화, 핵물질·핵무기 관련 구체적 활동 보도일 때. "핵 사용 연습"을 비난하는 담화 등은 official_statement
+- armed_clash: 실제 공격·교전·공습·포격이 일어난 보도일 때
+- 다른 나라 훈련·정책을 비난·규탄하는 담화, 성명, 논평은 official_statement
+- 사설·칼럼·분석 기사, 날씨·문화·행사처럼 안보 사건이 아닌 소식은 other (안보와 무관하면 relevant=false)`;
 
 export const T2_SYSTEM = `${COMMON_RULES}
 
