@@ -2,6 +2,7 @@ import { db } from '@/lib/db';
 import { read, write, body } from '@/lib/api';
 import { getEventDetail, recomputeEvent, reviewBlockers, ValidationError, findDuplicateCandidates } from '@/lib/events';
 import { generateSummary, suggestConflictAndChange } from '@/lib/ingest';
+import { judgeDuplicatesFor } from '@/lib/dupjudge';
 import { EVENT_TYPES } from '@/lib/types';
 import { nowIso } from '@/lib/time';
 import { round3, defaultAreaRadius } from '@/lib/geo';
@@ -84,7 +85,7 @@ export const PATCH = write<P>(async (req, { params }) => {
   return { ok: true };
 });
 
-/** 동작: review / unreview / reject / restore / ai_summary / ai_conflict */
+/** 동작: review / unreview / reject / restore / ai_summary / ai_conflict / ai_duplicates */
 export const POST = write<P>(async (req, { params }) => {
   const { id } = await params;
   const b = await body<{ action: string; reviewer?: string; confirmed?: boolean }>(req);
@@ -115,6 +116,10 @@ export const POST = write<P>(async (req, { params }) => {
     case 'ai_conflict': {
       const out = await suggestConflictAndChange(id);
       return { ok: true, suggestion: out };
+    }
+    case 'ai_duplicates': {
+      const n = await judgeDuplicatesFor(id, true);
+      return { ok: true, judged: n };
     }
     default:
       throw new ValidationError('알 수 없는 동작입니다');
