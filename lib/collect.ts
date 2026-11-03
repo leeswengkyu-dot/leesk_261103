@@ -3,6 +3,7 @@ import { db, inTx, uuid } from './db';
 import { nowIso, parseTime } from './time';
 import { processPendingArticles } from './ingest';
 import { translatePending } from './translate';
+import { judgePendingDuplicates } from './dupjudge';
 
 /** 수집 한 번의 최대 시간(ms). 서버리스 함수 제한 안에서 끝내기 위해 기사 처리를 이 안에서 멈춘다 */
 const BUDGET_MS = 200_000;
@@ -160,6 +161,15 @@ export async function runCollection(trigger: 'cron' | 'catchup' | 'manual' | 'li
       console.error('[translate] 번역 실패:', (e as Error).message);
     }
     aiNote = pr.aiNote;
+    // 중복 후보 AI 1차 판단 (아직 판단 안 한 후보를 몇 건씩)
+    try {
+      if (Date.now() < deadline) {
+        const dj = await judgePendingDuplicates(deadline);
+        if (dj.note && !aiNote) aiNote = dj.note;
+      }
+    } catch (e) {
+      console.error('[dupjudge] 중복 판단 실패:', (e as Error).message);
+    }
     if (pr.pendingLeft) aiNote = `${aiNote ?? ''} (처리 대기 ${pr.pendingLeft}건 — 다음 수집에서 이어서 처리)`.trim();
   } catch (e) {
     status = 'failed';

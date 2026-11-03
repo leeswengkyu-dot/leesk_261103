@@ -137,10 +137,13 @@ export async function getEventDetail(id: string) {
   );
   const dups = await d
     .prepare(
-      `SELECT c.id, c.status, CASE WHEN c.event_a=@id THEN c.event_b ELSE c.event_a END other_id
+      `SELECT c.id, c.status, c.ai_verdict, c.ai_confidence, c.ai_reason, c.ai_checked_at, CASE WHEN c.event_a=@id THEN c.event_b ELSE c.event_a END other_id
        FROM duplicate_candidates c WHERE (c.event_a=@id OR c.event_b=@id) AND c.status IN ('suggested','confirmed')`,
     )
-    .all<{ id: string; status: string; other_id: string }>({ id });
+    .all<{ id: string; status: string; other_id: string; ai_verdict: string | null; ai_confidence: number | null; ai_reason: string | null; ai_checked_at: string | null }>({ id });
+  // AI 가 같은 사건으로 본 후보를 위로, 별개로 본 후보를 아래로
+  const vOrder: Record<string, number> = { same: 0, unsure: 1, different: 3 };
+  dups.sort((a, b) => (a.status === 'confirmed' ? -1 : vOrder[a.ai_verdict ?? ''] ?? 2) - (b.status === 'confirmed' ? -1 : vOrder[b.ai_verdict ?? ''] ?? 2));
   const dupDetail = await Promise.all(
     dups.map(async (c) => {
       const o = await d.prepare('SELECT id,title,occurred_at,first_published_at,location_name,source_count,review_status FROM events WHERE id=?').get(c.other_id);
