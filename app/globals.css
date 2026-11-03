@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  height: 100%;
+}
+body {
+  font-size: 14px;
+  color: #111827;
+  background: #f3f4f6;
+  font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif;
+}
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center rounded border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply border-blue-700 bg-blue-700 text-white hover:bg-blue-800;
+  }
+  .btn-danger {
+    @apply border-red-600 bg-red-600 text-white hover:bg-red-700;
+  }
+  .btn-sm {
+    @apply px-2 py-1 text-xs;
+  }
+  .input {
+    @apply w-full rounded border border-gray-300 bg-white px-2 py-1 text-sm;
+  }
+  .card {
+    @apply rounded-lg border border-gray-200 bg-white;
+  }
+}
+.leaflet-container {
+  font-family: inherit;
+}
+/* 발표 모드 */
+.present {
+  font-size: 20px;
+}

@@ -1,0 +1,10 @@
+[
+  { "id": "feed-yna-nk", "name": "연합뉴스 북한", "region": "nk", "grade": "B", "is_party_source": 0, "feed_type": "rss", "url": "https://www.yna.co.kr/rss/northkorea.xml", "active": 1 },
+  { "id": "feed-38north", "name": "38 North", "region": "nk", "grade": "B", "is_party_source": 0, "feed_type": "rss", "url": "https://www.38north.org/feed/", "active": 1 },
+  { "id": "feed-nknews", "name": "NK News", "region": "nk", "grade": "C", "is_party_source": 0, "feed_type": "rss", "url": "https://www.nknews.org/feed/", "active": 1 },
+  { "id": "feed-un-peace", "name": "UN News (평화·안보)", "region": "global", "grade": "A", "is_party_source": 0, "feed_type": "rss", "url": "https://news.un.org/feed/subscribe/en/news/topic/peace-and-security/feed/rss.xml", "active": 1 },
+  { "id": "feed-iaea", "name": "IAEA 주요 소식", "region": "global", "grade": "A", "is_party_source": 0, "feed_type": "rss", "url": "https://www.iaea.org/feeds/topnews", "active": 1 },
+  { "id": "feed-yna-en", "name": "Yonhap News (English)", "region": "global", "grade": "B", "is_party_source": 0, "feed_type": "rss", "url": "https://en.yna.co.kr/RSS/news.xml", "active": 1 },
+  { "id": "feed-bbc-me", "name": "BBC News 중동", "region": "me", "grade": "C", "is_party_source": 0, "feed_type": "rss", "url": "http://feeds.bbci.co.uk/news/world/middle_east/rss.xml", "active": 1 },
+  { "id": "feed-kyiv", "name": "Kyiv Independent", "region": "ru_ua", "grade": "C", "is_party_source": 0, "feed_type": "rss", "url": "https://kyivindependent.com/news-archive/rss/", "active": 1 }
+]
