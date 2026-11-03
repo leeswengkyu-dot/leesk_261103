@@ -50,3 +50,15 @@ export const T4Schema = z.object({
   watch: z.array(sentence).default([]),
 });
 export type T4 = z.infer<typeof T4Schema>;
+
+export const T5Schema = z.object({
+  results: z.array(
+    z.object({
+      number: z.number().int(),
+      verdict: z.enum(['same', 'different', 'unsure']),
+      confidence: z.number().default(0.5),
+      reason: z.string().default(''),
+    }),
+  ),
+});
+export type T5 = z.infer<typeof T5Schema>;

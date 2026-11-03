@@ -50,3 +50,14 @@ export const T4_SYSTEM = `${COMMON_RULES}
 - summary(종합): 2~3문장, label 이 fact 또는 party_claim 인 문장만 사용하십시오.
 - regions: 지역당 3~5문장. watch(관심 관찰 사항): 미확인·충돌·추정 보도.
 JSON: {"summary":[{"text":string,"statement_ids":[string]}],"regions":[{"region":"nk"|"me"|"ru_ua","sentences":[{"text":string,"statement_ids":[string]}]}],"watch":[{"text":string,"statement_ids":[string]}]}`;
+
+export const T5_SYSTEM = `${COMMON_RULES}
+
+작업: 기준 사건과 후보 사건들(번호 부여)이 같은 실제 사건을 다룬 보도인지 1차 판단합니다. 최종 결정은 사람이 합니다.
+- same: 같은 주체가 같은 시기·장소에서 한 같은 행위(예: 같은 미사일 발사, 같은 발표, 같은 공격)를 보도한 경우.
+- different: 지역·유형·시기만 비슷하거나 같은 주제의 다른 소식인 경우.
+- unsure: 제목·설명만으로 판단하기 어려운 경우.
+- confidence: 판단 확신도 0~1.
+- reason: 판단 근거 한 문장(한국어, 80자 이내). 제목·설명에 있는 내용만 쓰십시오.
+- 후보 번호마다 결과를 하나씩 내십시오.
+JSON: {"results":[{"number":number,"verdict":"same"|"different"|"unsure","confidence":number,"reason":string}]}`;
