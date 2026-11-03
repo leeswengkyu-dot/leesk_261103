@@ -82,7 +82,7 @@ export default function SettingsPage() {
         </label>
         <div className="mt-2 flex items-center gap-2">
           <button className="btn btn-sm" disabled={!!busy} onClick={() => run('tr', async () => { const r = await api<any>('/api/translate', { method: 'POST' }); setMsg(`제목 번역: ${r.translated}건 완료, 실패 ${r.failed}건, 남음 ${r.left}건`); })}>{busy === 'tr' ? '번역 중...' : '기사 제목 번역 지금 실행'}</button>
-          <span className="text-xs text-gray-500">수집 때마다 자동 번역됩니다. 번역은 Claude API(키가 있을 때) 또는 무료 웹 번역을 사용합니다.</span>
+          <span className="text-xs text-gray-500">수집 때마다 자동 번역됩니다. 번역은 AI API(Gemini/Claude, 키가 있을 때) 또는 무료 웹 번역을 사용합니다.</span>
         </div>
         <p className="mt-2 text-xs text-gray-500">수집이 진행 중이면 새 요청은 거부됩니다. 원문 본문은 가져오지 않고 제목·설명·링크만 저장합니다.</p>
       </section>
@@ -163,7 +163,7 @@ export default function SettingsPage() {
           <label className="flex items-center gap-1"><input type="radio" name="aim" checked={s.ai_mode === 'api'} disabled={!s.ai.hasKey || !s.ai.model} onChange={() => run('ai', () => api('/api/settings', { method: 'PATCH', body: { ai_mode: 'api' } }))} />외부 AI API</label>
           <label className="flex items-center gap-1"><input type="radio" name="aim" checked={s.ai_mode === 'pre' || !s.ai.hasKey} onChange={() => run('ai', () => api('/api/settings', { method: 'PATCH', body: { ai_mode: 'pre' } }))} />사전 생성만 (AI 호출 없음)</label>
           <span>오늘 AI 호출: <b>{s.ai.used}</b> / {s.ai.limit}</span>
-          <span>모델: {s.ai.model ?? '(미설정)'}</span>
+          <span>AI: {s.ai.provider === 'gemini' ? 'Gemini' : 'Claude'} · 모델: {s.ai.model ?? '(미설정)'}</span>
         </div>
         {s.ai.reason && <div className="mt-2 rounded bg-amber-50 p-2 text-sm text-amber-900">{s.ai.reason}. AI 없이도 키워드 규칙으로 사건을 만들고, 요약은 직접 작성하거나 CSV(사전 생성 요약)로 넣을 수 있습니다.</div>}
       </section>
