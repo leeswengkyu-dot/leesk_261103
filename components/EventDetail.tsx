@@ -370,12 +370,36 @@ export default function EventDetail({ id, aiAvailable, aiReason, onClose, onChan
         {/* 중복 후보 */}
         {d.duplicates.length > 0 && (
           <section>
-            <h3 className="mb-1 font-bold">중복 후보 ({d.duplicates.filter((x: any) => x.status === 'suggested').length})</h3>
+            <div className="mb-1 flex flex-wrap items-center gap-2">
+              <h3 className="font-bold">중복 후보 ({d.duplicates.filter((x: any) => x.status === 'suggested').length})</h3>
+              {(() => {
+                const sg = d.duplicates.filter((x: any) => x.status === 'suggested');
+                const cnt = (v: string) => sg.filter((x: any) => x.ai_verdict === v).length;
+                const judged = sg.filter((x: any) => x.ai_verdict).length;
+                return judged > 0 ? (
+                  <span className="text-xs text-gray-600">AI 1차 판단: 같은 사건 <b className="text-red-700">{cnt('same')}</b> · 불확실 {cnt('unsure')} · 별개 {cnt('different')}{judged < sg.length ? ` · 미판단 ${sg.length - judged}` : ''}</span>
+                ) : null;
+              })()}
+              {!readOnly && d.duplicates.some((x: any) => x.status === 'suggested') && (
+                <button className="btn btn-sm" disabled={busy || !aiAvailable} title={aiAvailable ? '' : aiReason ?? ''} onClick={() => act(async () => {
+                  const r = await api<{ judged: number }>(`/api/events/${id}`, { method: 'POST', body: { action: 'ai_duplicates' } });
+                  setMsg(`AI가 중복 후보 ${r.judged}건을 판단했습니다 (제안일 뿐, 확정은 직접 해주세요)`);
+                })}>{d.duplicates.some((x: any) => x.ai_verdict) ? 'AI 다시 판단' : 'AI 중복 판단'}</button>
+              )}
+            </div>
             <ul className="space-y-1">
               {d.duplicates.map((c: any) => (
-                <li key={c.id} className="rounded border p-2 text-xs">
+                <li key={c.id} className={`rounded border p-2 text-xs ${c.status === 'suggested' && c.ai_verdict === 'same' ? 'border-red-300' : c.status === 'suggested' && c.ai_verdict === 'different' ? 'opacity-70' : ''}`}>
                   <button className="font-semibold text-blue-700 underline" onClick={() => onOpenEvent(c.other_id)}>{c.other?.title ?? c.other_id}</button>
                   <div className="text-gray-600">{fmtKst(c.other?.occurred_at ?? c.other?.first_published_at)} · {c.other?.location_name ?? '위치 미상'} · 출처 {c.other?.source_count}건 · {c.status === 'confirmed' ? '확정됨' : '제안됨'}</div>
+                  {c.ai_verdict && c.status === 'suggested' && (
+                    <div className={`mt-1 rounded px-2 py-1 ${c.ai_verdict === 'same' ? 'bg-red-50 text-red-800' : c.ai_verdict === 'unsure' ? 'bg-amber-50 text-amber-900' : 'bg-gray-50 text-gray-600'}`}>
+                      <b>AI 판단: {c.ai_verdict === 'same' ? '같은 사건' : c.ai_verdict === 'unsure' ? '불확실' : '별개 사건'}</b>
+                      {c.ai_confidence != null && <span> (확신도 {c.ai_confidence}%)</span>}
+                      {c.ai_reason && <span> — {c.ai_reason}</span>}
+                      <span className="text-gray-400"> · 제안일 뿐, 확정은 사람이 합니다</span>
+                    </div>
+                  )}
                   {c.status === 'suggested' && !readOnly && (
                     <div className="mt-1 flex gap-1">
                       <button className="btn btn-sm" disabled={busy} onClick={() => confirm('이 사건을 대표로 두고, 상대 사건의 기사를 합칩니다. 계속할까요?') && act(() => api('/api/duplicates', { method: 'POST', body: { op: 'confirm', candidate_id: c.id, representative_id: id } }), '같은 사건으로 확정했습니다 (출처 수 재계산)')}>같은 사건으로 확정 (이 사건 유지)</button>
